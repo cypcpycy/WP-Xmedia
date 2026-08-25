@@ -1,0 +1,15 @@
+*.zip
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+node_modules/
+/vendor/
+coverage/
+*.log
+*.tmp
+wp-content/uploads/
+accounts.toml
+config.toml
+*.cookie
+*.token
