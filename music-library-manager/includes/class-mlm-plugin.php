@@ -658,7 +658,6 @@ final class MLM_Plugin {
 		echo '<input type="file" name="mlm_api_rule_file" accept="application/json,.json" required> ';
 		submit_button( '导入并启用接口规则', 'secondary', 'submit', false );
 		echo ' <a class="button" href="' . esc_url( MLM_URL . 'templates/wp-xmedia-api-rule.json' ) . '" download="wp-xmedia-api-rule.json">下载规则模板</a>';
-		echo ' <a class="button" href="' . esc_url( MLM_URL . 'templates/wp-xmedia-local-api-rule.json' ) . '" download="wp-xmedia-local-api-rule.json">下载本地 API 规则</a>';
 		$rule = $this->api_rule();
 		if ( $rule ) { echo '<p class="description">当前规则：' . esc_html( (string) ( $rule['name'] ?? '' ) ) . ' ' . esc_html( (string) ( $rule['version'] ?? '' ) ) . '（' . esc_html( (string) ( $rule['base_url'] ?? '' ) ) . '）</p>'; }
 		echo '</form><hr><h2>播放列表</h2><p>可在“音乐库 → 音乐播放列表”中自定义列表，并给歌曲勾选所属列表。插入整张列表使用：<code>[music_playlist id=&quot;播放列表ID&quot;]</code> 或 <code>[music_playlist name=&quot;播放列表名称&quot;]</code>。</p><hr><h2>扩展接口</h2><p><code>mlm_remote_asset_url</code>、<code>mlm_max_remote_asset_size</code>、<code>mlm_asset_imported</code>、<code>mlm_track_saved</code></p></div>';

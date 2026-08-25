@@ -23,7 +23,7 @@ The companion API source is maintained separately at [music-search-api](https://
 
 ## Installation
 
-1. Download `WP-Xmedia-0.14.0.zip` from the [GitHub Releases page](https://github.com/cypcpycy/WP-Xmedia/releases/latest).
+1. Download the latest `WP-Xmedia` ZIP from the [GitHub Releases page](https://github.com/cypcpycy/WP-Xmedia/releases/latest).
 2. In WordPress, open **Plugins > Add New > Upload Plugin**.
 3. Upload the ZIP, install it, and activate the plugin.
 4. Open **Music Library > Settings** and import a compatible API JSON rule.
