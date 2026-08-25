@@ -6,6 +6,7 @@ WP-Xmedia is a WordPress music library plugin for managing tracks, importing aut
 
 - Dedicated, simplified track editor in WordPress admin
 - Remote music metadata search through a separately deployed music search API
+- Import a JSON API rule in the WordPress admin to configure the API URL and endpoint templates
 - Import audio, cover images, and LRC lyrics with official WordPress media APIs
 - Visual Gutenberg track and playlist selectors
 - Shortcodes for tracks, recent music, and playlists
@@ -22,10 +23,12 @@ The companion API source is maintained separately at [music-search-api](https://
 
 ## Installation
 
-1. Download `dist/WP-Xmedia-0.11.0.zip` from this repository.
+1. Download `dist/WP-Xmedia-0.12.0.zip` from this repository.
 2. In WordPress, open **Plugins > Add New > Upload Plugin**.
 3. Upload the ZIP, install it, and activate the plugin.
-4. Open **Music Library > Settings** and enter the remote API base URL.
+4. Open **Music Library > Settings** and either import the companion API JSON rule or enter the remote API base URL manually.
+
+The ready-to-import rule is maintained in the companion API repository at `integrations/wordpress/wp-xmedia-api-rule.json`. It contains endpoint mappings only and never contains account cookies, tokens, or passwords.
 
 ## Shortcodes
 

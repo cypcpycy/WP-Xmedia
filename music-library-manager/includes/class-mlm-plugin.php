@@ -10,6 +10,7 @@ final class MLM_Plugin {
 	private const TAXONOMY = 'mlm_music_category';
 	private const PLAYLIST_TAXONOMY = 'mlm_playlist';
 	private const OPTION = 'mlm_settings';
+	private const API_RULE_OPTION = 'mlm_api_rule';
 	private const META_KEYS = array( 'artist', 'album', 'audio_url', 'cover_url', 'lyrics', 'lyrics_url', 'source_url', 'duration' );
 
 	public static function instance(): self {
@@ -45,6 +46,7 @@ final class MLM_Plugin {
 		add_action( 'admin_notices', array( $this, 'admin_notices' ) );
 		add_action( 'admin_menu', array( $this, 'admin_menu' ) );
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
+		add_action( 'admin_post_mlm_import_api_rule', array( $this, 'import_api_rule' ) );
 		add_filter( 'use_block_editor_for_post_type', array( $this, 'disable_block_editor' ), 10, 2 );
 		add_filter( 'enter_title_here', array( $this, 'title_placeholder' ), 10, 2 );
 		add_action( 'edit_form_after_title', array( $this, 'render_editor_hint' ) );
@@ -415,16 +417,100 @@ final class MLM_Plugin {
 		return wp_parse_args( (array) get_option( self::OPTION, array() ), $this->default_settings() );
 	}
 
+	private function api_rule(): array {
+		$rule = (array) get_option( self::API_RULE_OPTION, array() );
+		return isset( $rule['endpoints'] ) && is_array( $rule['endpoints'] ) ? $rule : array();
+	}
+
+	private function api_path( string $name, array $values = array(), string $fallback = '' ): string {
+		$rule = $this->api_rule();
+		$path = (string) ( $rule['endpoints'][ $name ]['path'] ?? $fallback );
+		foreach ( $values as $key => $value ) {
+			$path = str_replace( '{' . $key . '}', rawurlencode( (string) $value ), $path );
+		}
+		return $path;
+	}
+
+	public function import_api_rule(): void {
+		if ( ! current_user_can( 'manage_options' ) ) { wp_die( '权限不足。', '', array( 'response' => 403 ) ); }
+		check_admin_referer( 'mlm_import_api_rule' );
+		$file = $_FILES['mlm_api_rule_file'] ?? null;
+		if ( ! is_array( $file ) || UPLOAD_ERR_OK !== (int) ( $file['error'] ?? UPLOAD_ERR_NO_FILE ) || empty( $file['tmp_name'] ) ) {
+			$this->redirect_rule_import( '请选择有效的 JSON 接口规则文件。', false );
+		}
+		if ( (int) ( $file['size'] ?? 0 ) > 256 * KB_IN_BYTES ) {
+			$this->redirect_rule_import( '接口规则文件不能超过 256 KB。', false );
+		}
+		$contents = file_get_contents( $file['tmp_name'] );
+		$rule = json_decode( (string) $contents, true );
+		$required = array( 'search', 'album', 'details', 'resource', 'login_status', 'login_start', 'login_poll', 'logout' );
+		if ( ! is_array( $rule ) || 'wp-xmedia-api-rule/v1' !== ( $rule['schema'] ?? '' ) || empty( $rule['base_url'] ) || empty( $rule['endpoints'] ) || ! is_array( $rule['endpoints'] ) ) {
+			$this->redirect_rule_import( '接口规则格式或版本不受支持。', false );
+		}
+		$base_url = esc_url_raw( untrailingslashit( (string) $rule['base_url'] ) );
+		if ( ! wp_http_validate_url( $base_url ) ) { $this->redirect_rule_import( '接口根地址无效。', false ); }
+		$clean_endpoints = array();
+		foreach ( $rule['endpoints'] as $name => $endpoint ) {
+			$name = sanitize_key( $name );
+			$path = sanitize_text_field( (string) ( $endpoint['path'] ?? '' ) );
+			$method = strtoupper( sanitize_key( $endpoint['method'] ?? 'GET' ) );
+			if ( $name && $path && '/' === $path[0] && false === strpos( $path, '://' ) && in_array( $method, array( 'GET', 'POST' ), true ) ) {
+				$clean_endpoints[ $name ] = array( 'method' => $method, 'path' => $path );
+			}
+		}
+		foreach ( $required as $name ) {
+			if ( empty( $clean_endpoints[ $name ]['path'] ) ) {
+				$this->redirect_rule_import( '接口规则缺少必要端点：' . $name, false );
+			}
+		}
+		$clean_rule = array(
+			'schema' => 'wp-xmedia-api-rule/v1',
+			'name' => sanitize_text_field( $rule['name'] ?? 'Music Search API' ),
+			'version' => sanitize_text_field( $rule['version'] ?? '' ),
+			'base_url' => $base_url,
+			'source' => sanitize_key( $rule['source'] ?? 'qq' ),
+			'defaults' => is_array( $rule['defaults'] ?? null ) ? $rule['defaults'] : array(),
+			'endpoints' => $clean_endpoints,
+			'response' => is_array( $rule['response'] ?? null ) ? $rule['response'] : array(),
+			'qualities' => array_values( array_filter( array_map( 'sanitize_key', (array) ( $rule['qualities'] ?? array() ) ) ) ),
+		);
+		update_option( self::API_RULE_OPTION, $clean_rule, false );
+		$settings = $this->settings();
+		$settings['api_base'] = $base_url;
+		update_option( self::OPTION, $settings, false );
+		$this->redirect_rule_import( '接口规则已导入并启用。', true );
+	}
+
+	private function redirect_rule_import( string $message, bool $success ): void {
+		$url = add_query_arg(
+			array( 'post_type' => self::POST_TYPE, 'page' => 'mlm-settings', 'mlm_rule_status' => $success ? 'success' : 'error', 'mlm_rule_message' => $message ),
+			admin_url( 'edit.php' )
+		);
+		wp_safe_redirect( $url );
+		exit;
+	}
+
 	public function render_settings_page(): void {
 		if ( ! current_user_can( 'manage_options' ) ) { return; }
 		$s = $this->settings();
-		echo '<div class="wrap"><h1>音乐库设置</h1><form method="post" action="options.php">';
+		echo '<div class="wrap"><h1>音乐库设置</h1>';
+		if ( isset( $_GET['mlm_rule_message'] ) ) {
+			$notice_class = 'success' === ( $_GET['mlm_rule_status'] ?? '' ) ? 'notice-success' : 'notice-error';
+			echo '<div class="notice ' . esc_attr( $notice_class ) . ' is-dismissible"><p>' . esc_html( sanitize_text_field( wp_unslash( $_GET['mlm_rule_message'] ) ) ) . '</p></div>';
+		}
+		echo '<form method="post" action="options.php">';
 		settings_fields( 'mlm_settings_group' );
 		echo '<table class="form-table"><tr><th scope="row"><label for="mlm_api_base">远程音乐 API 地址</label></th><td><input class="regular-text" type="url" id="mlm_api_base" name="' . esc_attr( self::OPTION ) . '[api_base]" value="' . esc_attr( $s['api_base'] ) . '" placeholder="https://music-api.example.com"><p class="description">填写已部署的远程 API 根地址，不要以斜杠结尾。本地 Docker 默认使用 http://music-search:8000。</p></td></tr><tr><th scope="row">自动导入媒体</th><td><label><input type="checkbox" name="' . esc_attr( self::OPTION ) . '[auto_import]" value="1" ' . checked( ! empty( $s['auto_import'] ), true, false ) . '> 新歌曲默认勾选自动导入远程文件</label></td></tr>';
 		$limits = array( 'max_image_mb' => '封面最大容量', 'max_audio_mb' => '音频最大容量', 'max_lyrics_mb' => '歌词文件最大容量' );
 		foreach ( $limits as $key => $label ) { printf( '<tr><th scope="row"><label for="mlm_%1$s">%2$s</label></th><td><input class="small-text" type="number" min="1" id="mlm_%1$s" name="%3$s[%1$s]" value="%4$d"> MB</td></tr>', esc_attr( $key ), esc_html( $label ), esc_attr( self::OPTION ), (int) $s[ $key ] ); }
 		echo '</table>';
 		submit_button();
+		echo '</form><hr><h2>导入 API 接口规则</h2><p>选择兼容的 JSON 规则文件后，插件会自动配置 API 根地址和端点模板；规则文件不应包含 Cookie、Token 或账号密码。</p><form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" enctype="multipart/form-data"><input type="hidden" name="action" value="mlm_import_api_rule">';
+		wp_nonce_field( 'mlm_import_api_rule' );
+		echo '<input type="file" name="mlm_api_rule_file" accept="application/json,.json" required> ';
+		submit_button( '导入并启用接口规则', 'secondary', 'submit', false );
+		$rule = $this->api_rule();
+		if ( $rule ) { echo '<p class="description">当前规则：' . esc_html( (string) ( $rule['name'] ?? '' ) ) . ' ' . esc_html( (string) ( $rule['version'] ?? '' ) ) . '（' . esc_html( (string) ( $rule['base_url'] ?? '' ) ) . '）</p>'; }
 		echo '</form><hr><h2>播放列表</h2><p>可在“音乐库 → 音乐播放列表”中自定义列表，并给歌曲勾选所属列表。插入整张列表使用：<code>[music_playlist id=&quot;播放列表ID&quot;]</code> 或 <code>[music_playlist name=&quot;播放列表名称&quot;]</code>。</p><hr><h2>扩展接口</h2><p><code>mlm_remote_asset_url</code>、<code>mlm_max_remote_asset_size</code>、<code>mlm_asset_imported</code>、<code>mlm_track_saved</code></p></div>';
 	}
 
@@ -434,7 +520,7 @@ final class MLM_Plugin {
 		$term = sanitize_text_field( wp_unslash( $_POST['term'] ?? '' ) );
 		$page = min( 100, max( 1, absint( $_POST['page'] ?? 1 ) ) );
 		if ( mb_strlen( $term ) < 2 ) { wp_send_json_error( array( 'message' => '请输入至少 2 个字符。' ), 400 ); }
-		$data = $this->music_api_request( '/api/search?' . http_build_query( array( 'q' => $term, 'source' => 'qq', 'limit' => 20, 'page' => $page ) ) );
+		$data = $this->music_api_request( $this->api_path( 'search', array( 'query' => $term, 'source' => 'qq', 'limit' => 20, 'page' => $page ), '/api/search?' . http_build_query( array( 'q' => $term, 'source' => 'qq', 'limit' => 20, 'page' => $page ) ) ) );
 		$results = array();
 		foreach ( $data['tracks'] ?? array() as $item ) {
 			$album_mid = sanitize_text_field( $item['album_mid'] ?? '' );
@@ -447,14 +533,14 @@ final class MLM_Plugin {
 				'duration' => absint( $item['duration_ms'] ?? 0 ), 'source' => sanitize_text_field( $item['source'] ?? 'qq' ),
 			);
 		}
-		wp_send_json_success( array( 'results' => $results, 'page' => $page, 'has_more' => 20 === count( $results ) ) );
+		wp_send_json_success( array( 'results' => $results, 'page' => $page, 'has_more' => ! empty( $data['pagination']['has_next'] ), 'pagination' => $data['pagination'] ?? array() ) );
 	}
 
 	public function ajax_album_songs(): void {
 		$this->check_music_ajax();
 		$album_mid = sanitize_text_field( wp_unslash( $_POST['album_mid'] ?? '' ) );
 		if ( ! preg_match( '/^[A-Za-z0-9]+$/', $album_mid ) ) { wp_send_json_error( array( 'message' => '专辑标识无效。' ), 400 ); }
-		$data = $this->music_api_request( '/api/album/' . rawurlencode( $album_mid ) );
+		$data = $this->music_api_request( $this->api_path( 'album', array( 'album_mid' => $album_mid ), '/api/album/' . rawurlencode( $album_mid ) ) );
 		$results = array();
 		foreach ( $data['tracks'] ?? array() as $item ) {
 			$results[] = array(
@@ -491,31 +577,32 @@ final class MLM_Plugin {
 
 	public function ajax_qq_status(): void {
 		$this->check_music_ajax();
-		wp_send_json_success( $this->music_api_request( '/api/qq/login/status' ) );
+		wp_send_json_success( $this->music_api_request( $this->api_path( 'login_status', array(), '/api/qq/login/status' ) ) );
 	}
 
 	public function ajax_qq_login_start(): void {
 		$this->check_music_ajax();
-		wp_send_json_success( $this->music_api_request( '/api/qq/login/start', 'POST' ) );
+		wp_send_json_success( $this->music_api_request( $this->api_path( 'login_start', array( 'login_type' => 'qq' ), '/api/qq/login/start' ), 'POST' ) );
 	}
 
 	public function ajax_qq_login_poll(): void {
 		$this->check_music_ajax();
 		$identifier = sanitize_text_field( wp_unslash( $_POST['identifier'] ?? '' ) );
-		wp_send_json_success( $this->music_api_request( '/api/qq/login/poll?identifier=' . rawurlencode( $identifier ) ) );
+		wp_send_json_success( $this->music_api_request( $this->api_path( 'login_poll', array( 'identifier' => $identifier, 'login_type' => 'qq' ), '/api/qq/login/poll?identifier=' . rawurlencode( $identifier ) ) ) );
 	}
 
 	public function ajax_resolve_music(): void {
 		$this->check_music_ajax();
 		$track_id = sanitize_text_field( wp_unslash( $_POST['track_id'] ?? '' ) );
 		$quality = $this->sanitize_quality( $_POST['quality'] ?? 'standard' );
-		wp_send_json_success( $this->music_api_request( '/api/resource/' . rawurlencode( $track_id ) . '?quality=' . rawurlencode( $quality ) ) );
+		wp_send_json_success( $this->music_api_request( $this->api_path( 'resource', array( 'track_id' => $track_id, 'quality' => $quality ), '/api/resource/' . rawurlencode( $track_id ) . '?quality=' . rawurlencode( $quality ) ) ) );
 	}
 
 	public function ajax_qq_stream(): void {
 		$this->check_music_ajax();
 		$track_id = sanitize_text_field( wp_unslash( $_REQUEST['track_id'] ?? '' ) );
-		$data = $this->music_api_request( '/api/resource/' . rawurlencode( $track_id ) . '?quality=' . rawurlencode( $this->sanitize_quality( $_REQUEST['quality'] ?? 'standard' ) ) );
+		$quality = $this->sanitize_quality( $_REQUEST['quality'] ?? 'standard' );
+		$data = $this->music_api_request( $this->api_path( 'resource', array( 'track_id' => $track_id, 'quality' => $quality ), '/api/resource/' . rawurlencode( $track_id ) . '?quality=' . rawurlencode( $quality ) ) );
 		if ( empty( $data['available'] ) || empty( $data['url'] ) ) { status_header( 404 ); wp_die( esc_html( $data['message'] ?? '当前音质不可用。' ) ); }
 		wp_redirect( esc_url_raw( $data['url'] ), 302, 'Music Library Manager' );
 		exit;
@@ -525,7 +612,7 @@ final class MLM_Plugin {
 		$this->check_music_ajax();
 		$track_id = sanitize_text_field( wp_unslash( $_POST['track_id'] ?? '' ) );
 		if ( '' === $track_id ) { wp_send_json_error( array( 'message' => '歌曲标识无效。' ), 400 ); }
-		$data = $this->music_api_request( '/api/details/' . rawurlencode( $track_id ) );
+		$data = $this->music_api_request( $this->api_path( 'details', array( 'track_id' => $track_id ), '/api/details/' . rawurlencode( $track_id ) ) );
 		wp_send_json_success( array( 'lyrics' => sanitize_textarea_field( (string) ( $data['lyrics'] ?? '' ) ) ) );
 	}
 
@@ -540,9 +627,9 @@ final class MLM_Plugin {
 		if ( ! is_array( $item ) || empty( $item['id'] ) || empty( $item['title'] ) ) { wp_send_json_error( array( 'message' => '歌曲资料无效。' ), 400 ); }
 		$quality = $this->sanitize_quality( $_POST['quality'] ?? 'standard' );
 		$track_id = sanitize_text_field( $item['id'] );
-		$resource = $this->music_api_request( '/api/resource/' . rawurlencode( $track_id ) . '?quality=' . rawurlencode( $quality ) );
+		$resource = $this->music_api_request( $this->api_path( 'resource', array( 'track_id' => $track_id, 'quality' => $quality ), '/api/resource/' . rawurlencode( $track_id ) . '?quality=' . rawurlencode( $quality ) ) );
 		if ( empty( $resource['available'] ) || empty( $resource['url'] ) ) { wp_send_json_error( array( 'message' => sanitize_text_field( $resource['message'] ?? '当前音质不可用。' ) ), 422 ); }
-		$details = $this->music_api_request( '/api/details/' . rawurlencode( $track_id ) );
+		$details = $this->music_api_request( $this->api_path( 'details', array( 'track_id' => $track_id ), '/api/details/' . rawurlencode( $track_id ) ) );
 		$lyrics = (string) ( $details['lyrics'] ?? '' );
 		$post_id = ! empty( $_POST['bulk'] ) ? 0 : absint( $_POST['post_id'] ?? 0 );
 		if ( ! $post_id || self::POST_TYPE !== get_post_type( $post_id ) ) {
