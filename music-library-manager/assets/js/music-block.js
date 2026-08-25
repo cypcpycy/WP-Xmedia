@@ -4,15 +4,19 @@
   const Fragment = element.Fragment;
   const useState = element.useState;
   const InspectorControls = blockEditor.InspectorControls;
+  const BlockControls = blockEditor.BlockControls;
+  const useBlockProps = blockEditor.useBlockProps;
   const Button = components.Button;
   const Modal = components.Modal;
   const PanelBody = components.PanelBody;
   const ToggleControl = components.ToggleControl;
   const TextControl = components.TextControl;
+  const ToolbarGroup = components.ToolbarGroup;
+  const ToolbarButton = components.ToolbarButton;
   const library = window.mlmBlockData || { tracks: [], playlists: [] };
 
   function cover(item) {
-    return item && item.cover ? el('img', { className: 'mlm-library-cover', src: item.cover, alt: '' }) : el('div', { className: 'mlm-library-cover mlm-library-cover-empty' }, '♫');
+    return item && item.cover ? el('img', { className: 'mlm-library-cover', src: item.cover, alt: '', loading: 'lazy', decoding: 'async' }) : el('div', { className: 'mlm-library-cover mlm-library-cover-empty' }, '♫');
   }
   function trackCard(track, selectedId, onSelect) {
     return el('article', { className: 'mlm-library-card' + (selectedId === track.id ? ' is-selected' : ''), key: track.id }, cover(track),
@@ -41,21 +45,24 @@
   }
   function SelectedPreview(props) {
     const item = props.item;
-    if (!item) return el('div', { className: 'mlm-block-empty' }, el('span', { className: 'dashicons dashicons-format-audio' }), el('strong', null, props.mode === 'playlist' ? '还没有选择播放列表' : '还没有选择歌曲'), el(Button, { variant: 'primary', onClick: props.onOpen }, '打开可视化音乐库'));
+    if (!item) return el('div', { className: 'mlm-block-empty' }, el('span', { className: 'dashicons dashicons-format-audio' }), el('strong', null, props.mode === 'playlist' ? '还没有选择播放列表' : '还没有选择歌曲'), el('div', { className: 'mlm-block-actions' }, el(Button, { variant: 'primary', onClick: props.onOpen }, '打开可视化音乐库'), el(Button, { variant: 'secondary', isDestructive: true, onClick: props.onRemove }, '删除区块')));
     const first = props.mode === 'playlist' ? (item.tracks[0] || {}) : item;
     return el('div', { className: 'mlm-selected-preview' }, cover(first), el('div', { className: 'mlm-selected-info' },
       el('strong', null, props.mode === 'playlist' ? item.name : item.title), el('span', null, props.mode === 'playlist' ? item.count + ' 首歌曲' : (item.artist || '未知歌手')),
       el('small', null, props.mode === 'playlist' ? item.tracks.slice(0, 5).map(function (track) { return track.title; }).join(' · ') : (item.album || '暂无专辑')), first.audio && el('audio', { controls: true, preload: 'none', src: first.audio })),
-      el(Button, { variant: 'secondary', onClick: props.onOpen }, '重新选择'));
+      el('div', { className: 'mlm-block-actions' }, el(Button, { variant: 'secondary', onClick: props.onOpen }, '重新选择'), el(Button, { variant: 'secondary', isDestructive: true, onClick: props.onRemove }, '删除区块')));
   }
   function blockEdit(mode) {
     return function (props) {
       const idKey = mode === 'playlist' ? 'playlistId' : 'trackId'; const selectedId = props.attributes[idKey] || 0;
-      const modalState = useState(!selectedId); const isOpen = modalState[0]; const setOpen = modalState[1];
+      const modalState = useState(false); const isOpen = modalState[0]; const setOpen = modalState[1];
       const source = mode === 'playlist' ? library.playlists : library.tracks; const selected = source.find(function (item) { return item.id === selectedId; });
+      const blockProps = useBlockProps({ className: 'mlm-block-preview' });
       function choose(id) { const value = {}; value[idKey] = id; props.setAttributes(value); setOpen(false); }
+      function removeBlock() { window.wp.data.dispatch('core/block-editor').removeBlock(props.clientId); }
       return el(Fragment, {}, mode === 'track' && el(InspectorControls, {}, el(PanelBody, { title: '播放器设置', initialOpen: true }, el(ToggleControl, { label: '显示歌词', checked: props.attributes.showLyrics, onChange: function (value) { props.setAttributes({ showLyrics: value }); } }))),
-        el('div', { className: 'mlm-block-preview' }, el(SelectedPreview, { mode: mode, item: selected, onOpen: function () { setOpen(true); } })),
+        el(BlockControls, {}, el(ToolbarGroup, {}, el(ToolbarButton, { icon: 'trash', label: '删除音乐区块', onClick: removeBlock }))),
+        el('div', blockProps, el(SelectedPreview, { mode: mode, item: selected, onOpen: function () { setOpen(true); }, onRemove: removeBlock })),
         isOpen && el(LibraryModal, { mode: mode, selectedId: selectedId, onSelect: choose, onClose: function () { setOpen(false); } }));
     };
   }

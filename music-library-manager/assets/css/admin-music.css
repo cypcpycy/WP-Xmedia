@@ -1,6 +1,8 @@
 .mlm-qq-status{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:8px 0;border-bottom:1px solid #dcdcde}
 #mlm-qq-panel{width:100%;text-align:center;padding:10px;background:#f6f7f7;border-radius:4px}
 #mlm-qq-panel[hidden]{display:none}
+#mlm-qq-login[hidden]{display:none!important}
+#mlm-qq-logout[hidden]{display:none!important}
 #mlm-qq-qr{width:180px;height:180px;background:#fff}
 #mlm-quality{min-height:36px;max-width:100%;margin-top:8px}
 #mlm-search-message{width:100%;color:#646970;margin:6px 0}
@@ -53,6 +55,8 @@
 .mlm-album-aplayer-panel .aplayer-list{border-top:1px solid #dcdcde}
 .mlm-album-aplayer-panel .aplayer-list ol li{height:42px;line-height:42px}
 .mlm-album-selection{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.mlm-duplicate-choice{display:inline-flex;align-items:center;gap:5px;margin:0 4px;padding:5px 8px;border:1px solid #c3c4c7;border-radius:6px;background:#fff;color:#50575e;white-space:nowrap}
+.mlm-duplicate-choice input{margin:0}
 .mlm-track-selector{float:left;display:grid;place-items:center;width:34px;height:42px;cursor:pointer}
 .mlm-track-selector input{margin:0}
 .mlm-album-aplayer-panel .aplayer-list ol li .aplayer-list-index{margin-left:0}

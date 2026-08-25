@@ -3,7 +3,7 @@ Contributors: music-library-manager
 Tags: music, audio, player, shortcode
 Requires at least: 6.2
 Requires PHP: 7.4
-Stable tag: 0.13.1
+Stable tag: 0.14.0
 License: GPLv2 or later
 
 管理歌曲资料。WordPress 插件连接独立部署的远程音乐 API，完成 QQ 音乐搜索、授权、试听和资源解析；媒体文件仍由 WordPress 导入自己的媒体库。
@@ -31,6 +31,14 @@ License: GPLv2 or later
 播放器使用随插件分发的 APlayer 1.10.1（MIT License），不会在访客浏览页面时请求 CDN。歌曲标题、作者、封面、本地媒体附件与 LRC 歌词均会传入播放器；同一页面可放置多个 [music] 和 [music_list] 实例。[music] 可使用 lyrics="no" 关闭歌词。
 
 == 更新日志 ==
+= 0.14.0 =
+* 新增可编辑的 APlayer 风格播放列表管理页面，并统一前端歌单播放器样式。
+* 播放列表支持增减歌曲，以及删除列表时选择是否同时删除歌曲记录和相关媒体文件。
+* 专辑批量导入支持将一次重复文件选择应用到后续全部重复歌曲。
+* Gutenberg 音乐区块支持正常选择和删除，并使用缩略图与延迟加载改善编辑器性能。
+* 音乐库列表移除歌词与地址列，保留更简洁的管理信息。
+* 精简 API 规则模板，新增带注释的公开模板和本地 Docker 规则下载。
+
 = 0.13.1 =
 * 设置页移除手工 API 地址和 GitHub Token 输入框，只通过 JSON 规则文件配置远程接口。
 * 保存媒体设置时保留已导入规则中的 API 地址。

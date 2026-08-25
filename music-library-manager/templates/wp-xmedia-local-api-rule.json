@@ -1,0 +1,49 @@
+{
+  "_comment": "WP-Xmedia 本地 Docker API 规则，可直接导入本地 WordPress 测试站点。",
+  "schema": "wp-xmedia-api-rule/v1",
+  "name": "WP-Xmedia Local Music API",
+  "version": "1.0.0",
+  "base_url": "http://music-search:8000",
+  "endpoints": {
+    "search": {
+      "_comment": "搜索歌曲。",
+      "method": "GET",
+      "path": "/api/search?q={query}&source={source}&page={page}&limit={limit}"
+    },
+    "album": {
+      "_comment": "获取专辑曲目。",
+      "method": "GET",
+      "path": "/api/album/{album_mid}"
+    },
+    "details": {
+      "_comment": "获取歌曲详情和歌词。",
+      "method": "GET",
+      "path": "/api/details/{track_id}"
+    },
+    "resource": {
+      "_comment": "获取指定音质的音频资源。",
+      "method": "GET",
+      "path": "/api/resource/{track_id}?quality={quality}"
+    },
+    "login_status": {
+      "_comment": "检查 QQ 音乐登录状态。",
+      "method": "GET",
+      "path": "/api/qq/login/status"
+    },
+    "login_start": {
+      "_comment": "开始 QQ 音乐扫码登录。",
+      "method": "POST",
+      "path": "/api/qq/login/start?login_type={login_type}"
+    },
+    "login_poll": {
+      "_comment": "轮询 QQ 音乐扫码登录结果。",
+      "method": "GET",
+      "path": "/api/qq/login/poll?identifier={identifier}&login_type={login_type}"
+    },
+    "logout": {
+      "_comment": "退出 QQ 音乐登录。",
+      "method": "POST",
+      "path": "/api/qq/login/logout"
+    }
+  }
+}

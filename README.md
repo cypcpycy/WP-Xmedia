@@ -23,10 +23,21 @@ The companion API source is maintained separately at [music-search-api](https://
 
 ## Installation
 
-1. Download `dist/WP-Xmedia-0.13.1.zip` from this repository.
+1. Download `dist/WP-Xmedia-0.14.0.zip` from this repository.
 2. In WordPress, open **Plugins > Add New > Upload Plugin**.
 3. Upload the ZIP, install it, and activate the plugin.
-4. Open **Music Library > Settings** and either import the companion API JSON rule or enter the remote API base URL manually.
+4. Open **Music Library > Settings** and import a compatible API JSON rule.
+
+## Version 0.14.0 highlights
+
+- Editable APlayer-style playlist management in WordPress admin
+- APlayer album layout for front-end playlists
+- Add or remove tracks from playlists and choose how playlist deletion handles tracks and media
+- Duplicate audio detection for single and album imports, with one choice applied to later duplicates
+- Faster Gutenberg music selection using thumbnail and lazy-loaded artwork
+- Removable Gutenberg track and playlist blocks
+- Simplified music library columns and streamlined API rule templates
+- Public and local Docker API rule downloads in plugin settings
 
 The ready-to-import rule is maintained in the companion API repository at `integrations/wordpress/wp-xmedia-api-rule.json`. It contains endpoint mappings only and never contains account cookies, tokens, or passwords.
 

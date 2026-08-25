@@ -24,6 +24,7 @@ final class MLM_Plugin {
 		add_action( 'init', array( $this, 'register_post_type' ) );
 		add_action( 'add_meta_boxes', array( $this, 'add_meta_boxes' ) );
 		add_action( 'save_post_' . self::POST_TYPE, array( $this, 'save_track' ) );
+		add_action( 'before_delete_post', array( $this, 'delete_track_attachments' ), 10, 2 );
 		add_action( 'admin_enqueue_scripts', array( $this, 'admin_assets' ) );
 		add_action( 'enqueue_block_editor_assets', array( $this, 'enqueue_block_editor_data' ) );
 		add_action( 'wp_enqueue_scripts', array( $this, 'register_front_assets' ) );
@@ -34,6 +35,7 @@ final class MLM_Plugin {
 		add_action( 'wp_ajax_mlm_qq_status', array( $this, 'ajax_qq_status' ) );
 		add_action( 'wp_ajax_mlm_qq_login_start', array( $this, 'ajax_qq_login_start' ) );
 		add_action( 'wp_ajax_mlm_qq_login_poll', array( $this, 'ajax_qq_login_poll' ) );
+		add_action( 'wp_ajax_mlm_qq_logout', array( $this, 'ajax_qq_logout' ) );
 		add_action( 'wp_ajax_mlm_qq_stream', array( $this, 'ajax_qq_stream' ) );
 		add_action( 'wp_ajax_mlm_qq_lyrics', array( $this, 'ajax_qq_lyrics' ) );
 		add_shortcode( 'music', array( $this, 'single_shortcode' ) );
@@ -42,11 +44,15 @@ final class MLM_Plugin {
 		add_filter( 'manage_' . self::POST_TYPE . '_posts_columns', array( $this, 'columns' ) );
 		add_action( 'manage_' . self::POST_TYPE . '_posts_custom_column', array( $this, 'column_content' ), 10, 2 );
 		add_filter( 'post_row_actions', array( $this, 'row_actions' ), 10, 2 );
+		add_filter( 'display_post_states', array( $this, 'hide_track_post_states' ), 10, 2 );
 		add_filter( 'upload_mimes', array( $this, 'allow_lyrics_mime' ) );
 		add_action( 'admin_notices', array( $this, 'admin_notices' ) );
 		add_action( 'admin_menu', array( $this, 'admin_menu' ) );
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
+		add_action( 'admin_init', array( $this, 'redirect_playlist_taxonomy_page' ) );
 		add_action( 'admin_post_mlm_import_api_rule', array( $this, 'import_api_rule' ) );
+		add_action( 'admin_post_mlm_save_playlist_tracks', array( $this, 'save_playlist_tracks' ) );
+		add_action( 'admin_post_mlm_delete_playlist', array( $this, 'delete_playlist' ) );
 		add_filter( 'use_block_editor_for_post_type', array( $this, 'disable_block_editor' ), 10, 2 );
 		add_filter( 'enter_title_here', array( $this, 'title_placeholder' ), 10, 2 );
 		add_action( 'edit_form_after_title', array( $this, 'render_editor_hint' ) );
@@ -137,27 +143,54 @@ final class MLM_Plugin {
 		$posts = get_posts( array( 'post_type' => self::POST_TYPE, 'post_status' => 'publish', 'posts_per_page' => 200, 'orderby' => 'title', 'order' => 'ASC' ) );
 		$tracks = array();
 		$track_map = array();
+		$track_identities = array(); $seen_audio = array(); $seen_song = array();
 		foreach ( $posts as $post ) {
+			$cover_id = absint( get_post_meta( $post->ID, '_mlm_cover_attachment_id', true ) );
+			$cover_thumbnail = $cover_id ? wp_get_attachment_image_url( $cover_id, 'thumbnail' ) : '';
 			$item = array(
 				'id' => $post->ID, 'title' => get_the_title( $post ),
 				'artist' => (string) get_post_meta( $post->ID, '_mlm_artist', true ),
 				'album' => (string) get_post_meta( $post->ID, '_mlm_album', true ),
-				'cover' => $this->attachment_url( $post->ID, 'cover' ),
+				'cover' => $cover_thumbnail ?: $this->attachment_url( $post->ID, 'cover' ),
 				'audio' => $this->attachment_url( $post->ID, 'audio' ),
 			);
-			$tracks[] = $item; $track_map[ $post->ID ] = $item;
+			$identity = $this->track_identity_keys( $post, $item );
+			$track_map[ $post->ID ] = $item; $track_identities[ $post->ID ] = $identity;
+			if ( ( $identity['audio'] && isset( $seen_audio[ $identity['audio'] ] ) ) || ( $identity['song'] && isset( $seen_song[ $identity['song'] ] ) ) ) { continue; }
+			if ( $identity['audio'] ) { $seen_audio[ $identity['audio'] ] = true; }
+			if ( $identity['song'] ) { $seen_song[ $identity['song'] ] = true; }
+			$tracks[] = $item;
 		}
 		$playlists = array();
 		$terms = get_terms( array( 'taxonomy' => self::PLAYLIST_TAXONOMY, 'hide_empty' => false ) );
 		if ( ! is_wp_error( $terms ) ) {
 			foreach ( $terms as $term ) {
 				$ids = get_objects_in_term( $term->term_id, self::PLAYLIST_TAXONOMY );
-				$items = array();
-				foreach ( $ids as $id ) { if ( isset( $track_map[ $id ] ) ) { $items[] = $track_map[ $id ]; } }
+				$items = array(); $playlist_audio = array(); $playlist_song = array();
+				foreach ( $ids as $id ) {
+					if ( ! isset( $track_map[ $id ] ) ) { continue; }
+					$identity = $track_identities[ $id ];
+					if ( ( $identity['audio'] && isset( $playlist_audio[ $identity['audio'] ] ) ) || ( $identity['song'] && isset( $playlist_song[ $identity['song'] ] ) ) ) { continue; }
+					if ( $identity['audio'] ) { $playlist_audio[ $identity['audio'] ] = true; }
+					if ( $identity['song'] ) { $playlist_song[ $identity['song'] ] = true; }
+					$items[] = $track_map[ $id ];
+				}
 				$playlists[] = array( 'id' => $term->term_id, 'name' => $term->name, 'count' => count( $items ), 'tracks' => $items );
 			}
 		}
 		wp_add_inline_script( 'mlm-music-block', 'window.mlmBlockData = ' . wp_json_encode( array( 'tracks' => $tracks, 'playlists' => $playlists ) ) . ';', 'before' );
+	}
+
+	private function track_identity_keys( WP_Post $post, array $item ): array {
+		$audio_key = ''; $attachment_id = absint( get_post_meta( $post->ID, '_mlm_audio_attachment_id', true ) );
+		if ( $attachment_id ) {
+			$hash = (string) get_post_meta( $attachment_id, '_mlm_file_sha256', true ); $file = get_attached_file( $attachment_id );
+			if ( ! $hash && $file && is_readable( $file ) ) { $hash = (string) hash_file( 'sha256', $file ); if ( $hash ) { update_post_meta( $attachment_id, '_mlm_file_sha256', $hash ); } }
+			$audio_key = $hash ? 'hash:' . $hash : 'attachment:' . $attachment_id;
+		} elseif ( ! empty( $item['audio'] ) ) { $audio_key = 'url:' . strtolower( untrailingslashit( (string) $item['audio'] ) ); }
+		$normalize = static function ( string $value ): string { return (string) preg_replace( '/[\p{P}\p{Z}\s]+/u', '', mb_strtolower( trim( $value ) ) ); };
+		$song_key = $normalize( (string) $item['title'] ) . '|' . $normalize( (string) $item['artist'] );
+		return array( 'audio' => $audio_key, 'song' => '|' === $song_key ? '' : $song_key );
 	}
 
 	public function render_music_block( array $attributes ): string {
@@ -242,7 +275,7 @@ final class MLM_Plugin {
 	public function render_search_box(): void {
 		echo '<p>在弹窗中搜索、试听并导入完整歌曲资料。</p><button type="button" class="button button-primary button-large" id="mlm-open-search">打开音乐搜索</button>';
 		echo '<div id="mlm-search-modal" class="mlm-modal" hidden><div class="mlm-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="mlm-modal-title"><header class="mlm-modal-header"><div><h2 id="mlm-modal-title">搜索并添加歌曲</h2><span id="mlm-qq-state">正在检查 QQ 音乐登录状态…</span></div><button type="button" class="mlm-modal-close" aria-label="关闭">×</button></header><div class="mlm-modal-body">';
-		echo '<div class="mlm-qq-status"><button type="button" class="button" id="mlm-qq-login">QQ 扫码登录</button></div><div id="mlm-qq-panel" hidden><img id="mlm-qq-qr" alt="QQ 登录二维码"><p id="mlm-qq-hint">扫码后请在手机上确认。</p></div>';
+		echo '<div class="mlm-qq-status"><button type="button" class="button" id="mlm-qq-login" hidden disabled>QQ 扫码登录</button><button type="button" class="button" id="mlm-qq-logout" hidden disabled>退出登录</button></div><div id="mlm-qq-panel" hidden><img id="mlm-qq-qr" alt="QQ 登录二维码"><p id="mlm-qq-hint">扫码后请在手机上确认。</p></div>';
 		echo '<div class="mlm-search-controls"><input class="widefat" id="mlm-search-term" type="search" placeholder="输入歌曲名或歌手，例如：周杰伦 七里香"><select id="mlm-quality"><option value="standard">标准 MP3 128k</option><option value="hq">高品质 MP3 320k</option><option value="lossless">无损 FLAC</option><option value="master">臻品母带</option></select><button type="button" class="button button-primary" id="mlm-search-button">搜索</button><span class="spinner" id="mlm-search-spinner"></span></div><div id="mlm-search-message"></div><div id="mlm-search-results"></div><nav id="mlm-pagination" class="mlm-pagination" hidden><button type="button" class="button" id="mlm-prev-page">上一页</button><strong id="mlm-current-page">第 1 页</strong><button type="button" class="button" id="mlm-next-page">下一页</button></nav></div></div></div>';
 	}
 
@@ -263,7 +296,35 @@ final class MLM_Plugin {
 		if ( ! empty( $data['import_assets'] ) ) {
 			$this->import_assets( $post_id, $data );
 		}
+		if ( in_array( get_post_status( $post_id ), array( 'draft', 'pending', 'auto-draft' ), true ) && '' !== trim( get_the_title( $post_id ) ) ) {
+			wp_update_post( array( 'ID' => $post_id, 'post_status' => 'publish' ) );
+		}
 		do_action( 'mlm_track_saved', $post_id, $data );
+	}
+
+	public function delete_track_attachments( int $post_id, WP_Post $post ): void {
+		if ( self::POST_TYPE !== $post->post_type ) { return; }
+		$attachment_ids = array_filter( array_map( 'absint', array(
+			get_post_meta( $post_id, '_mlm_audio_attachment_id', true ),
+			get_post_meta( $post_id, '_mlm_cover_attachment_id', true ),
+			get_post_meta( $post_id, '_mlm_lyrics_attachment_id', true ),
+			get_post_thumbnail_id( $post_id ),
+		) ) );
+		foreach ( array_unique( $attachment_ids ) as $attachment_id ) {
+			$used_elsewhere = get_posts( array(
+				'post_type' => self::POST_TYPE, 'post_status' => 'any', 'posts_per_page' => 1, 'fields' => 'ids',
+				'post__not_in' => array( $post_id ),
+				'meta_query' => array( 'relation' => 'OR',
+					array( 'key' => '_mlm_audio_attachment_id', 'value' => $attachment_id, 'compare' => '=' ),
+					array( 'key' => '_mlm_cover_attachment_id', 'value' => $attachment_id, 'compare' => '=' ),
+					array( 'key' => '_mlm_lyrics_attachment_id', 'value' => $attachment_id, 'compare' => '=' ),
+					array( 'key' => '_thumbnail_id', 'value' => $attachment_id, 'compare' => '=' ),
+				),
+			) );
+			if ( ! $used_elsewhere && 'attachment' === get_post_type( $attachment_id ) ) {
+				wp_delete_attachment( $attachment_id, true );
+			}
+		}
 	}
 
 	private function render_attachment_status( int $post_id ): void {
@@ -353,6 +414,7 @@ final class MLM_Plugin {
 		$file = array( 'name' => $name, 'tmp_name' => $tmp );
 		$id = media_handle_sideload( $file, $post_id, $title, array( 'post_title' => $title ) );
 		if ( is_wp_error( $id ) ) { wp_delete_file( $tmp ); }
+		else { $attached_file = get_attached_file( $id ); if ( $attached_file && is_readable( $attached_file ) ) { update_post_meta( $id, '_mlm_file_sha256', hash_file( 'sha256', $attached_file ) ); } }
 		return $id;
 	}
 
@@ -382,6 +444,15 @@ final class MLM_Plugin {
 	public function admin_assets( string $hook ): void {
 		$screen = get_current_screen();
 		if ( ! $screen || self::POST_TYPE !== $screen->post_type ) { return; }
+		if ( false !== strpos( $hook, '_page_mlm-playlists' ) ) {
+			wp_enqueue_style( 'mlm-aplayer-admin', MLM_URL . 'assets/vendor/aplayer/APlayer.min.css', array(), '1.10.1' );
+			wp_enqueue_style( 'mlm-admin-playlists', MLM_URL . 'assets/css/admin-playlists.css', array(), MLM_VERSION );
+			wp_enqueue_style( 'mlm-admin-playlist-editor', MLM_URL . 'assets/css/admin-playlist-editor.css', array( 'mlm-admin-playlists' ), MLM_VERSION );
+			wp_enqueue_script( 'mlm-aplayer-admin', MLM_URL . 'assets/vendor/aplayer/APlayer.min.js', array(), '1.10.1', true );
+			wp_enqueue_script( 'mlm-admin-playlists', MLM_URL . 'assets/js/admin-playlists.js', array( 'mlm-aplayer-admin' ), MLM_VERSION, true );
+			wp_enqueue_script( 'mlm-admin-playlist-editor', MLM_URL . 'assets/js/admin-playlist-editor.js', array( 'mlm-admin-playlists' ), MLM_VERSION, true );
+			return;
+		}
 		wp_enqueue_media();
 		wp_enqueue_style( 'mlm-aplayer-admin', MLM_URL . 'assets/vendor/aplayer/APlayer.min.css', array(), '1.10.1' );
 		wp_enqueue_style( 'mlm-admin', MLM_URL . 'assets/css/admin.css', array(), MLM_VERSION );
@@ -392,7 +463,82 @@ final class MLM_Plugin {
 	}
 
 	public function admin_menu(): void {
+		remove_submenu_page( 'edit.php?post_type=' . self::POST_TYPE, 'edit-tags.php?taxonomy=' . self::PLAYLIST_TAXONOMY . '&amp;post_type=' . self::POST_TYPE );
+		add_submenu_page( 'edit.php?post_type=' . self::POST_TYPE, '音乐播放列表', '音乐播放列表', 'edit_posts', 'mlm-playlists', array( $this, 'render_playlists_page' ) );
 		add_submenu_page( 'edit.php?post_type=' . self::POST_TYPE, '音乐库设置', '设置', 'manage_options', 'mlm-settings', array( $this, 'render_settings_page' ) );
+	}
+
+	public function redirect_playlist_taxonomy_page(): void {
+		global $pagenow;
+		if ( 'edit-tags.php' !== $pagenow || self::PLAYLIST_TAXONOMY !== ( $_GET['taxonomy'] ?? '' ) || self::POST_TYPE !== ( $_GET['post_type'] ?? '' ) || isset( $_GET['tag_ID'] ) || isset( $_GET['mlm_manage'] ) ) { return; }
+		wp_safe_redirect( add_query_arg( array( 'post_type' => self::POST_TYPE, 'page' => 'mlm-playlists' ), admin_url( 'edit.php' ) ) );
+		exit;
+	}
+
+	public function save_playlist_tracks(): void {
+		if ( ! current_user_can( 'manage_categories' ) ) { wp_die( '权限不足。', '', array( 'response' => 403 ) ); }
+		$playlist_id = absint( $_POST['playlist_id'] ?? 0 ); check_admin_referer( 'mlm_save_playlist_tracks_' . $playlist_id );
+		$term = get_term( $playlist_id, self::PLAYLIST_TAXONOMY ); if ( ! $term || is_wp_error( $term ) ) { wp_die( '播放列表不存在。', '', array( 'response' => 404 ) ); }
+		$selected = array_fill_keys( array_map( 'absint', (array) ( $_POST['track_ids'] ?? array() ) ), true );
+		$tracks = get_posts( array( 'post_type' => self::POST_TYPE, 'post_status' => array( 'publish', 'draft', 'private' ), 'posts_per_page' => -1, 'fields' => 'ids' ) );
+		foreach ( $tracks as $track_id ) { if ( isset( $selected[ $track_id ] ) ) { wp_set_object_terms( $track_id, array( $playlist_id ), self::PLAYLIST_TAXONOMY, true ); } else { wp_remove_object_terms( $track_id, $playlist_id, self::PLAYLIST_TAXONOMY ); } }
+		$this->redirect_playlist_admin( $playlist_id, '播放列表内容已保存。' );
+	}
+
+	public function delete_playlist(): void {
+		if ( ! current_user_can( 'manage_categories' ) ) { wp_die( '权限不足。', '', array( 'response' => 403 ) ); }
+		$playlist_id = absint( $_POST['playlist_id'] ?? 0 ); check_admin_referer( 'mlm_delete_playlist_' . $playlist_id );
+		$term = get_term( $playlist_id, self::PLAYLIST_TAXONOMY ); if ( ! $term || is_wp_error( $term ) ) { wp_die( '播放列表不存在。', '', array( 'response' => 404 ) ); }
+		$delete_tracks = 'with_tracks' === sanitize_key( $_POST['delete_mode'] ?? 'playlist_only' ); $deleted_tracks = 0;
+		if ( $delete_tracks ) { foreach ( (array) get_objects_in_term( $playlist_id, self::PLAYLIST_TAXONOMY ) as $track_id ) { if ( current_user_can( 'delete_post', $track_id ) && wp_delete_post( (int) $track_id, true ) ) { $deleted_tracks++; } } }
+		wp_delete_term( $playlist_id, self::PLAYLIST_TAXONOMY );
+		$this->redirect_playlist_admin( 0, $delete_tracks ? '播放列表已删除，并永久删除其中 ' . $deleted_tracks . ' 首歌曲及其独占媒体文件。' : '播放列表已删除，歌曲和媒体文件均已保留。' );
+	}
+
+	private function redirect_playlist_admin( int $playlist_id, string $message ): void {
+		$args = array( 'post_type' => self::POST_TYPE, 'page' => 'mlm-playlists', 'mlm_playlist_message' => $message ); if ( $playlist_id ) { $args['playlist_id'] = $playlist_id; }
+		wp_safe_redirect( add_query_arg( $args, admin_url( 'edit.php' ) ) ); exit;
+	}
+
+	public function render_playlists_page(): void {
+		if ( ! current_user_can( 'edit_posts' ) ) { return; }
+		$playlist_id = absint( $_GET['playlist_id'] ?? 0 );
+		$manage_url = add_query_arg( array( 'taxonomy' => self::PLAYLIST_TAXONOMY, 'post_type' => self::POST_TYPE, 'mlm_manage' => 1 ), admin_url( 'edit-tags.php' ) );
+		echo '<div class="wrap mlm-playlists-admin">';
+		if ( isset( $_GET['mlm_playlist_message'] ) ) { echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( sanitize_text_field( wp_unslash( $_GET['mlm_playlist_message'] ) ) ) . '</p></div>'; }
+		if ( $playlist_id ) {
+			$term = get_term( $playlist_id, self::PLAYLIST_TAXONOMY );
+			if ( ! $term || is_wp_error( $term ) ) { echo '<h1>音乐播放列表</h1><div class="notice notice-error"><p>找不到这个歌单。</p></div></div>'; return; }
+			$query = new WP_Query( array( 'post_type' => self::POST_TYPE, 'posts_per_page' => -1, 'post_status' => array( 'publish', 'draft', 'private' ), 'orderby' => 'date', 'order' => 'ASC', 'tax_query' => array( array( 'taxonomy' => self::PLAYLIST_TAXONOMY, 'field' => 'term_id', 'terms' => $term->term_id ) ) ) );
+			$audio = array(); $unavailable = array();
+			foreach ( $query->posts as $post ) {
+				$url = $this->attachment_url( $post->ID, 'audio' );
+				if ( ! $url ) { $unavailable[] = $post; continue; }
+				$audio[] = array( 'name' => wp_strip_all_tags( get_the_title( $post ) ), 'artist' => wp_strip_all_tags( (string) get_post_meta( $post->ID, '_mlm_artist', true ) ), 'url' => esc_url_raw( $url ), 'cover' => esc_url_raw( $this->attachment_url( $post->ID, 'cover' ) ), 'lrc' => sanitize_textarea_field( (string) get_post_meta( $post->ID, '_mlm_lyrics', true ) ) );
+			}
+			$back_url = add_query_arg( array( 'post_type' => self::POST_TYPE, 'page' => 'mlm-playlists' ), admin_url( 'edit.php' ) );
+			echo '<p><a class="button" href="' . esc_url( $back_url ) . '">← 返回全部歌单</a></p><div class="mlm-playlist-heading"><div><h1>' . esc_html( $term->name ) . '</h1><p>' . count( $query->posts ) . ' 首歌曲，' . count( $audio ) . ' 首可播放</p></div><a class="button" href="' . esc_url( get_edit_term_link( $term->term_id, self::PLAYLIST_TAXONOMY, self::POST_TYPE ) ) . '">编辑歌单</a></div>';
+			if ( $audio ) { echo '<div class="mlm-admin-album-player" data-playlist="' . esc_attr( wp_json_encode( $audio, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ) ) . '"></div>'; }
+			else { echo '<div class="mlm-playlist-empty"><p>这个歌单还没有可播放的音频文件。</p></div>'; }
+			if ( $unavailable ) { echo '<h2>暂不可播放</h2><ul class="mlm-unavailable-tracks">'; foreach ( $unavailable as $post ) { echo '<li><a href="' . esc_url( get_edit_post_link( $post->ID, 'raw' ) ) . '">' . esc_html( get_the_title( $post ) ) . '</a>：尚未导入音频文件</li>'; } echo '</ul>'; }
+			$all_tracks = get_posts( array( 'post_type' => self::POST_TYPE, 'post_status' => array( 'publish', 'draft', 'private' ), 'posts_per_page' => -1, 'orderby' => 'title', 'order' => 'ASC' ) ); $member_ids = array_fill_keys( array_map( 'intval', (array) get_objects_in_term( $term->term_id, self::PLAYLIST_TAXONOMY ) ), true );
+			echo '<section class="mlm-playlist-members"><h2>编辑歌单曲目</h2><p>勾选要加入此歌单的歌曲，取消勾选即可移出。</p><form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="mlm_save_playlist_tracks"><input type="hidden" name="playlist_id" value="' . (int) $term->term_id . '">'; wp_nonce_field( 'mlm_save_playlist_tracks_' . $term->term_id ); echo '<div class="mlm-track-checklist">';
+			foreach ( $all_tracks as $track ) { $cover = $this->attachment_url( $track->ID, 'cover' ); echo '<label class="mlm-track-choice"><input type="checkbox" name="track_ids[]" value="' . (int) $track->ID . '" ' . checked( isset( $member_ids[ $track->ID ] ), true, false ) . '><span class="mlm-choice-cover">' . ( $cover ? '<img src="' . esc_url( $cover ) . '" alt="">' : '<span class="dashicons dashicons-format-audio"></span>' ) . '</span><span><strong>' . esc_html( get_the_title( $track ) ) . '</strong><small>' . esc_html( (string) get_post_meta( $track->ID, '_mlm_artist', true ) ) . '</small></span></label>'; }
+			echo '</div>'; submit_button( '保存歌单内容', 'primary', 'submit', false ); echo '</form></section>';
+			if ( current_user_can( 'manage_categories' ) ) { echo '<section class="mlm-playlist-danger"><h2>删除播放列表</h2><p>可只删除列表，也可以同时永久删除列表中的歌曲记录和相关媒体文件。</p><form class="mlm-delete-playlist-form" method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="mlm_delete_playlist"><input type="hidden" name="playlist_id" value="' . (int) $term->term_id . '"><input type="hidden" name="delete_mode" value="playlist_only">'; wp_nonce_field( 'mlm_delete_playlist_' . $term->term_id ); submit_button( '删除播放列表', 'delete', 'submit', false ); echo '</form></section>'; }
+			echo '</div>'; return;
+		}
+		$terms = get_terms( array( 'taxonomy' => self::PLAYLIST_TAXONOMY, 'hide_empty' => false, 'orderby' => 'name', 'order' => 'ASC' ) );
+		echo '<div class="mlm-playlists-heading"><div><h1>音乐播放列表</h1><p>选择一个歌单，查看并播放其中的全部音乐。</p></div><a class="button button-primary" href="' . esc_url( $manage_url ) . '">新建或管理歌单</a></div>';
+		if ( is_wp_error( $terms ) || ! $terms ) { echo '<div class="mlm-playlist-empty"><p>还没有歌单，请先创建一个音乐播放列表。</p></div></div>'; return; }
+		echo '<div class="mlm-playlist-grid">';
+		foreach ( $terms as $term ) {
+			$ids = get_objects_in_term( $term->term_id, self::PLAYLIST_TAXONOMY ); $cover = '';
+			foreach ( array_slice( (array) $ids, 0, 10 ) as $id ) { $cover = $this->attachment_url( (int) $id, 'cover' ); if ( $cover ) { break; } }
+			$url = add_query_arg( array( 'post_type' => self::POST_TYPE, 'page' => 'mlm-playlists', 'playlist_id' => $term->term_id ), admin_url( 'edit.php' ) );
+			echo '<a class="mlm-playlist-card" href="' . esc_url( $url ) . '"><span class="mlm-playlist-cover">' . ( $cover ? '<img src="' . esc_url( $cover ) . '" alt="">' : '<span class="dashicons dashicons-playlist-audio"></span>' ) . '</span><span class="mlm-playlist-meta"><strong>' . esc_html( $term->name ) . '</strong><small>' . count( (array) $ids ) . ' 首歌曲</small></span><span class="dashicons dashicons-arrow-right-alt2"></span></a>';
+		}
+		echo '</div></div>';
 	}
 
 	public function register_settings(): void {
@@ -449,7 +595,8 @@ final class MLM_Plugin {
 			$this->redirect_rule_import( '接口规则格式或版本不受支持。', false );
 		}
 		$base_url = esc_url_raw( untrailingslashit( (string) $rule['base_url'] ) );
-		if ( ! wp_http_validate_url( $base_url ) ) { $this->redirect_rule_import( '接口根地址无效。', false ); }
+		$is_local_docker_api = 'http://music-search:8000' === $base_url;
+		if ( ! wp_http_validate_url( $base_url ) && ! $is_local_docker_api ) { $this->redirect_rule_import( '接口根地址无效。', false ); }
 		$clean_endpoints = array();
 		foreach ( $rule['endpoints'] as $name => $endpoint ) {
 			$name = sanitize_key( $name );
@@ -511,6 +658,7 @@ final class MLM_Plugin {
 		echo '<input type="file" name="mlm_api_rule_file" accept="application/json,.json" required> ';
 		submit_button( '导入并启用接口规则', 'secondary', 'submit', false );
 		echo ' <a class="button" href="' . esc_url( MLM_URL . 'templates/wp-xmedia-api-rule.json' ) . '" download="wp-xmedia-api-rule.json">下载规则模板</a>';
+		echo ' <a class="button" href="' . esc_url( MLM_URL . 'templates/wp-xmedia-local-api-rule.json' ) . '" download="wp-xmedia-local-api-rule.json">下载本地 API 规则</a>';
 		$rule = $this->api_rule();
 		if ( $rule ) { echo '<p class="description">当前规则：' . esc_html( (string) ( $rule['name'] ?? '' ) ) . ' ' . esc_html( (string) ( $rule['version'] ?? '' ) ) . '（' . esc_html( (string) ( $rule['base_url'] ?? '' ) ) . '）</p>'; }
 		echo '</form><hr><h2>播放列表</h2><p>可在“音乐库 → 音乐播放列表”中自定义列表，并给歌曲勾选所属列表。插入整张列表使用：<code>[music_playlist id=&quot;播放列表ID&quot;]</code> 或 <code>[music_playlist name=&quot;播放列表名称&quot;]</code>。</p><hr><h2>扩展接口</h2><p><code>mlm_remote_asset_url</code>、<code>mlm_max_remote_asset_size</code>、<code>mlm_asset_imported</code>、<code>mlm_track_saved</code></p></div>';
@@ -593,6 +741,11 @@ final class MLM_Plugin {
 		wp_send_json_success( $this->music_api_request( $this->api_path( 'login_poll', array( 'identifier' => $identifier, 'login_type' => 'qq' ), '/api/qq/login/poll?identifier=' . rawurlencode( $identifier ) ) ) );
 	}
 
+	public function ajax_qq_logout(): void {
+		$this->check_music_ajax();
+		wp_send_json_success( $this->music_api_request( $this->api_path( 'logout', array(), '/api/qq/login/logout' ), 'POST' ) );
+	}
+
 	public function ajax_resolve_music(): void {
 		$this->check_music_ajax();
 		$track_id = sanitize_text_field( wp_unslash( $_POST['track_id'] ?? '' ) );
@@ -631,14 +784,21 @@ final class MLM_Plugin {
 		$track_id = sanitize_text_field( $item['id'] );
 		$resource = $this->music_api_request( $this->api_path( 'resource', array( 'track_id' => $track_id, 'quality' => $quality ), '/api/resource/' . rawurlencode( $track_id ) . '?quality=' . rawurlencode( $quality ) ) );
 		if ( empty( $resource['available'] ) || empty( $resource['url'] ) ) { wp_send_json_error( array( 'message' => sanitize_text_field( $resource['message'] ?? '当前音质不可用。' ) ), 422 ); }
+		$reuse_audio_id = absint( $_POST['reuse_duplicate_id'] ?? 0 );
+		if ( $reuse_audio_id && ( 'attachment' !== get_post_type( $reuse_audio_id ) || 0 !== strpos( (string) get_post_mime_type( $reuse_audio_id ), 'audio/' ) ) ) { wp_send_json_error( array( 'message' => '要引用的媒体附件无效。' ), 400 ); }
+		if ( ! $reuse_audio_id ) {
+			$duplicate_id = $this->find_duplicate_remote_audio( esc_url_raw( $resource['url'] ) );
+			if ( is_wp_error( $duplicate_id ) ) { wp_send_json_error( array( 'message' => '音频校验失败：' . $duplicate_id->get_error_message() ), 502 ); }
+			if ( $duplicate_id ) { wp_send_json_error( array( 'duplicate' => true, 'attachment_id' => $duplicate_id, 'attachment_title' => get_the_title( $duplicate_id ), 'attachment_url' => wp_get_attachment_url( $duplicate_id ), 'message' => '媒体库中已有内容完全相同的音频文件。是否引用已有文件继续导入？' ), 409 ); }
+		}
 		$details = $this->music_api_request( $this->api_path( 'details', array( 'track_id' => $track_id ), '/api/details/' . rawurlencode( $track_id ) ) );
 		$lyrics = (string) ( $details['lyrics'] ?? '' );
 		$post_id = ! empty( $_POST['bulk'] ) ? 0 : absint( $_POST['post_id'] ?? 0 );
 		if ( ! $post_id || self::POST_TYPE !== get_post_type( $post_id ) ) {
-			$post_id = wp_insert_post( array( 'post_type' => self::POST_TYPE, 'post_status' => 'draft', 'post_title' => sanitize_text_field( $item['title'] ) ), true );
+			$post_id = wp_insert_post( array( 'post_type' => self::POST_TYPE, 'post_status' => 'publish', 'post_title' => sanitize_text_field( $item['title'] ) ), true );
 			if ( is_wp_error( $post_id ) ) { wp_send_json_error( array( 'message' => $post_id->get_error_message() ), 500 ); }
 		} elseif ( ! current_user_can( 'edit_post', $post_id ) ) { wp_send_json_error( array( 'message' => '无权编辑当前歌曲。' ), 403 ); }
-		wp_update_post( array( 'ID' => $post_id, 'post_title' => sanitize_text_field( $item['title'] ) ) );
+		wp_update_post( array( 'ID' => $post_id, 'post_title' => sanitize_text_field( $item['title'] ), 'post_status' => 'publish' ) );
 		$meta = array(
 			'artist' => sanitize_text_field( $item['artist'] ?? '' ), 'album' => sanitize_text_field( $item['album'] ?? '' ),
 			'source_url' => esc_url_raw( $item['source_url'] ?? '' ), 'duration' => absint( $item['duration'] ?? 0 ),
@@ -654,7 +814,7 @@ final class MLM_Plugin {
 				$playlist_edit_url = add_query_arg( array( 'post_type' => self::POST_TYPE, self::PLAYLIST_TAXONOMY => $playlist_term->slug ), admin_url( 'edit.php' ) );
 			}
 		}
-		$audio_id = $this->sideload_asset( esc_url_raw( $resource['url'] ), $post_id, sanitize_text_field( $item['title'] ), 'audio' );
+		$audio_id = $reuse_audio_id ?: $this->sideload_asset( esc_url_raw( $resource['url'] ), $post_id, sanitize_text_field( $item['title'] ), 'audio' );
 		if ( is_wp_error( $audio_id ) ) { wp_send_json_error( array( 'message' => '音频导入失败：' . $audio_id->get_error_message() ), 502 ); }
 		update_post_meta( $post_id, '_mlm_audio_attachment_id', $audio_id );
 		update_post_meta( $post_id, '_mlm_audio_url', esc_url_raw( wp_get_attachment_url( $audio_id ) ) );
@@ -666,7 +826,33 @@ final class MLM_Plugin {
 		}
 		$lyrics_id = $this->sideload_lyrics_text( $lyrics, $post_id, sanitize_text_field( $item['title'] ) );
 		if ( $lyrics_id && ! is_wp_error( $lyrics_id ) ) { update_post_meta( $post_id, '_mlm_lyrics_attachment_id', $lyrics_id ); update_post_meta( $post_id, '_mlm_lyrics_url', esc_url_raw( wp_get_attachment_url( $lyrics_id ) ) ); }
-		wp_send_json_success( array( 'message' => '已添加到音乐库并导入媒体文件。', 'post_id' => $post_id, 'edit_url' => get_edit_post_link( $post_id, 'raw' ), 'playlist_edit_url' => $playlist_edit_url, 'audio_url' => wp_get_attachment_url( $audio_id ), 'cover_url' => $cover_id && ! is_wp_error( $cover_id ) ? wp_get_attachment_url( $cover_id ) : '', 'lyrics_url' => $lyrics_id && ! is_wp_error( $lyrics_id ) ? wp_get_attachment_url( $lyrics_id ) : '', 'lyrics' => $lyrics ) );
+		wp_send_json_success( array( 'message' => $reuse_audio_id ? '已添加歌曲并引用媒体库中的相同音频文件。' : '已添加到音乐库并导入媒体文件。', 'reused_audio' => (bool) $reuse_audio_id, 'post_id' => $post_id, 'edit_url' => get_edit_post_link( $post_id, 'raw' ), 'playlist_edit_url' => $playlist_edit_url, 'audio_url' => wp_get_attachment_url( $audio_id ), 'cover_url' => $cover_id && ! is_wp_error( $cover_id ) ? wp_get_attachment_url( $cover_id ) : '', 'lyrics_url' => $lyrics_id && ! is_wp_error( $lyrics_id ) ? wp_get_attachment_url( $lyrics_id ) : '', 'lyrics' => $lyrics ) );
+	}
+
+	private function find_duplicate_remote_audio( string $url ) {
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		$tmp = download_url( $url, 30 );
+		if ( is_wp_error( $tmp ) ) { return $tmp; }
+		$settings = $this->settings();
+		if ( filesize( $tmp ) > (int) $settings['max_audio_mb'] * MB_IN_BYTES ) { wp_delete_file( $tmp ); return new WP_Error( 'mlm_file_too_large', '远程文件超过允许大小。' ); }
+		$duplicate_id = $this->find_duplicate_audio_file( $tmp ); wp_delete_file( $tmp );
+		return $duplicate_id;
+	}
+
+	private function find_duplicate_audio_file( string $file_path ) {
+		$size = filesize( $file_path ); $hash = hash_file( 'sha256', $file_path );
+		if ( ! $hash ) { return new WP_Error( 'mlm_hash_failed', '无法计算音频文件指纹。' ); }
+		$known = get_posts( array( 'post_type' => 'attachment', 'post_status' => 'inherit', 'post_mime_type' => 'audio', 'posts_per_page' => 1, 'fields' => 'ids', 'meta_key' => '_mlm_file_sha256', 'meta_value' => $hash ) );
+		if ( $known ) { return (int) $known[0]; }
+		$candidates = get_posts( array( 'post_type' => 'attachment', 'post_status' => 'inherit', 'post_mime_type' => 'audio', 'posts_per_page' => -1, 'fields' => 'ids' ) );
+		foreach ( $candidates as $attachment_id ) {
+			$file = get_attached_file( $attachment_id );
+			if ( ! $file || ! is_readable( $file ) || filesize( $file ) !== $size ) { continue; }
+			$candidate_hash = (string) get_post_meta( $attachment_id, '_mlm_file_sha256', true );
+			if ( ! $candidate_hash ) { $candidate_hash = (string) hash_file( 'sha256', $file ); if ( $candidate_hash ) { update_post_meta( $attachment_id, '_mlm_file_sha256', $candidate_hash ); } }
+			if ( hash_equals( $hash, $candidate_hash ) ) { return (int) $attachment_id; }
+		}
+		return 0;
 	}
 
 	private function sideload_lyrics_text( string $lyrics, int $post_id, string $title ) {
@@ -683,12 +869,14 @@ final class MLM_Plugin {
 	public function register_front_assets(): void {
 		wp_register_style( 'mlm-aplayer', MLM_URL . 'assets/vendor/aplayer/APlayer.min.css', array(), '1.10.1' );
 		wp_register_style( 'mlm-player', MLM_URL . 'assets/css/player.css', array( 'mlm-aplayer' ), MLM_VERSION );
+		wp_register_style( 'mlm-player-layout-fix', MLM_URL . 'assets/css/player-layout-fix.css', array( 'mlm-player' ), MLM_VERSION );
 		wp_register_script( 'mlm-aplayer', MLM_URL . 'assets/vendor/aplayer/APlayer.min.js', array(), '1.10.1', true );
 		wp_register_script( 'mlm-player', MLM_URL . 'assets/js/player.js', array( 'mlm-aplayer' ), MLM_VERSION, true );
 	}
 
 	private function enqueue_front_assets(): void {
 		wp_enqueue_style( 'mlm-player' );
+		wp_enqueue_style( 'mlm-player-layout-fix' );
 		wp_enqueue_script( 'mlm-player' );
 	}
 
@@ -718,9 +906,15 @@ final class MLM_Plugin {
 		if ( ! $term || is_wp_error( $term ) ) { return ''; }
 		$query = new WP_Query( array( 'post_type' => self::POST_TYPE, 'posts_per_page' => -1, 'post_status' => 'publish', 'orderby' => 'date', 'order' => 'ASC', 'tax_query' => array( array( 'taxonomy' => self::PLAYLIST_TAXONOMY, 'field' => 'term_id', 'terms' => $term->term_id ) ) ) );
 		if ( ! $query->have_posts() ) { return '<p>该播放列表暂无已发布歌曲。</p>'; }
-		$this->enqueue_front_assets(); $html = '<section class="mlm-playlist"><h3>' . esc_html( $term->name ) . '</h3>';
-		foreach ( $query->posts as $post ) { $html .= $this->render_player( $post, false ); }
-		return $html . '</section>';
+		$audio = array();
+		foreach ( $query->posts as $post ) {
+			$url = $this->attachment_url( $post->ID, 'audio' );
+			if ( ! $url ) { continue; }
+			$audio[] = array( 'name' => wp_strip_all_tags( get_the_title( $post ) ), 'artist' => wp_strip_all_tags( (string) get_post_meta( $post->ID, '_mlm_artist', true ) ), 'url' => esc_url_raw( $url ), 'cover' => esc_url_raw( $this->attachment_url( $post->ID, 'cover' ) ), 'lrc' => sanitize_textarea_field( (string) get_post_meta( $post->ID, '_mlm_lyrics', true ) ) );
+		}
+		if ( ! $audio ) { return '<p>该播放列表暂无可播放音频。</p>'; }
+		$this->enqueue_front_assets();
+		return '<section class="mlm-playlist"><h3>' . esc_html( $term->name ) . '</h3><article class="mlm-player mlm-playlist-player"><div class="mlm-aplayer" data-mlm-audio="' . esc_attr( wp_json_encode( $audio, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ) ) . '"></div></article></section>';
 	}
 
 	private function render_player( WP_Post $post, bool $show_lyrics ): string {
@@ -752,8 +946,7 @@ final class MLM_Plugin {
 	public function columns( array $columns ): array {
 		return array(
 			'cb' => $columns['cb'] ?? '<input type="checkbox">', 'mlm_cover' => '封面', 'title' => '歌曲名称',
-			'mlm_artist' => '作者', 'mlm_album' => '专辑名称', 'mlm_category' => '分类', 'mlm_lyrics' => '歌词',
-			'mlm_address' => '地址', 'mlm_actions' => '操作',
+			'mlm_artist' => '作者', 'mlm_album' => '专辑名称', 'mlm_category' => '分类', 'mlm_actions' => '操作',
 		);
 	}
 
@@ -780,11 +973,15 @@ final class MLM_Plugin {
 		}
 		if ( 'mlm_actions' === $column ) {
 			printf( '<a href="%s">编辑</a>', esc_url( get_edit_post_link( $post_id ) ) );
-			if ( current_user_can( 'delete_post', $post_id ) ) { printf( ' | <a class="submitdelete" href="%s">删除</a>', esc_url( get_delete_post_link( $post_id ) ) ); }
+			if ( current_user_can( 'delete_post', $post_id ) ) { printf( ' | <a class="submitdelete" href="%s" onclick="return window.confirm(\'永久删除这首歌曲以及它独占的音频、封面和歌词文件？此操作无法撤销。\');">永久删除歌曲及文件</a>', esc_url( get_delete_post_link( $post_id, '', true ) ) ); }
 		}
 	}
 
 	public function row_actions( array $actions, WP_Post $post ): array {
 		return self::POST_TYPE === $post->post_type ? array() : $actions;
+	}
+
+	public function hide_track_post_states( array $states, WP_Post $post ): array {
+		return self::POST_TYPE === $post->post_type ? array() : $states;
 	}
 }

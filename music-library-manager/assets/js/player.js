@@ -14,7 +14,8 @@
 				return;
 			}
 
-			if (!audio.url) {
+			var tracks = Array.isArray(audio) ? audio.filter(function (item) { return item && item.url; }) : (audio.url ? [audio] : []);
+			if (!tracks.length) {
 				return;
 			}
 
@@ -22,8 +23,11 @@
 			new window.APlayer({
 				container: container,
 				preload: 'none',
-				lrcType: audio.lrc ? 1 : 0,
-				audio: [audio]
+				mutex: true,
+				lrcType: tracks.some(function (item) { return item.lrc; }) ? 1 : 0,
+				listFolded: false,
+				listMaxHeight: '420px',
+				audio: tracks
 			});
 		});
 	}

@@ -4,6 +4,20 @@
   const $message = $('#mlm-search-message');
   const escapeHtml = value => $('<div>').text(value || '').html();
   const request = data => $.post(mlmAdmin.ajaxUrl, Object.assign({ nonce: mlmAdmin.nonce }, data));
+  const importMusic = (item, options, resolveDuplicate) => {
+    const deferred = $.Deferred();
+    const send = reuseId => request(Object.assign({ action: 'mlm_import_music', track: JSON.stringify(item), quality: quality(), reuse_duplicate_id: reuseId || 0 }, options || {}))
+      .done(response => deferred.resolve(response))
+      .fail(xhr => {
+        const duplicate = xhr.responseJSON?.data;
+        if (!duplicate?.duplicate) { deferred.reject(xhr); return; }
+        const details = duplicate.attachment_title ? '\n\n已有文件：' + duplicate.attachment_title : '';
+        const reuse = typeof resolveDuplicate === 'function' ? resolveDuplicate(duplicate, details) : window.confirm((duplicate.message || '媒体库中已有相同文件，是否引用已有文件继续导入？') + details);
+        if (reuse) { send(duplicate.attachment_id); return; }
+        xhr.mlmDuplicateCanceled = true; deferred.reject(xhr);
+      });
+    send(0); return deferred.promise();
+  };
   const quality = () => $('#mlm-quality').val() || 'standard';
   const streamUrl = (item, selected = quality()) => mlmAdmin.ajaxUrl + '?' + $.param({ action: 'mlm_qq_stream', nonce: mlmAdmin.nonce, track_id: item.id, quality: selected });
   let currentPage = 1;
@@ -22,13 +36,8 @@
 	  if (typeof APlayer === 'undefined') return;
 	  $results.find('.mlm-result-aplayer').each(function () {
 		const container = this; const card = $(container).closest('.mlm-search-result'); const item = JSON.parse(decodeURIComponent(card.attr('data-track')));
-		$(container).html('<div class="mlm-player-loading">正在加载完整播放器和歌词…</div>');
-		request({ action: 'mlm_qq_lyrics', track_id: item.id }).always(function (response) {
-		  const lyrics = response?.success ? (response.data?.lyrics || '') : '';
-		  $(container).empty();
-		  const player = new APlayer({ container, mini: false, autoplay: false, theme: '#2271b1', preload: 'none', mutex: true, lrcType: 1, audio: audioConfig(item, quality(), lyrics) });
-		  adminPlayers.push(player);
-		});
+		const player = new APlayer({ container, mini: false, autoplay: false, theme: '#2271b1', preload: 'none', mutex: true, lrcType: 1, audio: audioConfig(item, quality()) });
+		adminPlayers.push(player);
 	  });
 	}
 
@@ -48,30 +57,54 @@
   $('#mlm-search-modal').on('click', function (event) { if (event.target === this) closeSearchModal(); });
   $(document).on('keydown', function (event) { if (event.key === 'Escape' && !$('#mlm-search-modal').prop('hidden')) closeSearchModal(); });
 
-  function setLoginState(loggedIn) {
-    $('#mlm-qq-state').text(loggedIn ? 'QQ 音乐已登录' : 'QQ 音乐尚未登录');
-    $('#mlm-qq-login').prop('hidden', loggedIn);
+  let qqLoggedIn = false;
+  let loginPollTimer = null;
+  function setLoginState(status) {
+    const loggedIn = status === true || status?.logged_in === true;
+    const credentialPresent = loggedIn || status?.credential_present === true;
+    const credentialValid = loggedIn && status?.credential_valid !== false;
+    qqLoggedIn = loggedIn;
+    if (loggedIn && loginPollTimer) { clearInterval(loginPollTimer); loginPollTimer = null; }
+    const stateText = credentialValid ? 'QQ 音乐已登录 · 凭证有效' : (credentialPresent ? (status?.message || 'QQ 音乐登录凭证无效') : 'QQ 音乐尚未登录 · 无有效凭证');
+    $('#mlm-qq-state').text(stateText);
+    $('#mlm-qq-login').prop('hidden', loggedIn).toggle(!loggedIn).prop('disabled', false).text('QQ 扫码登录');
+    $('#mlm-qq-logout').prop('hidden', !credentialPresent).toggle(credentialPresent).prop('disabled', false).text('退出登录');
     if (loggedIn) $('#mlm-qq-panel').prop('hidden', true);
   }
-  request({ action: 'mlm_qq_status' }).done(response => setLoginState(!!response.data?.logged_in));
+  request({ action: 'mlm_qq_status' }).done(response => setLoginState(response.data || false)).fail(() => setLoginState({ credential_present: false, message: '暂时无法检查登录凭证' }));
   $('#mlm-qq-login').on('click', function () {
+    if (qqLoggedIn) return;
     const $button = $(this).prop('disabled', true).text('正在生成二维码…');
     request({ action: 'mlm_qq_login_start' }).done(function (response) {
-      if (!response.success) return;
+      if (!response.success) { $('#mlm-qq-state').text(response.data?.message || '二维码获取失败'); $button.prop('disabled', false).text('QQ 扫码登录'); return; }
+      if (qqLoggedIn) return;
       $('#mlm-qq-qr').attr('src', response.data.img); $('#mlm-qq-panel').prop('hidden', false); $('#mlm-qq-state').text('等待扫码…');
       let attempts = 0;
-      const timer = setInterval(function () {
+      loginPollTimer = setInterval(function () {
         attempts += 1;
 		request({ action: 'mlm_qq_login_poll', identifier: response.data.identifier }).done(function (poll) {
-		  if (!poll.success) { clearInterval(timer); $('#mlm-qq-state').text(poll.data?.message || 'QQ 登录失败，请重试'); $button.prop('disabled', false).text('QQ 扫码登录'); return; }
-          if (poll.data?.logged_in) { clearInterval(timer); setLoginState(true); return; }
+		  if (!poll.success) { clearInterval(loginPollTimer); loginPollTimer = null; $('#mlm-qq-state').text(poll.data?.message || 'QQ 登录失败，请重试'); $button.prop('disabled', false).text('QQ 扫码登录'); return; }
+          if (poll.data?.logged_in) { setLoginState(poll.data); return; }
 		  if (poll.data?.event === 67 || poll.data?.event === 404) $('#mlm-qq-state').text('已扫码，请在手机上确认…');
-		  if (poll.data?.event === 65 || poll.data?.event === 402 || poll.data?.event === 68 || poll.data?.event === 403 || attempts >= 90) { clearInterval(timer); $('#mlm-qq-state').text('二维码已失效或登录被取消，请重新登录'); $button.prop('disabled', false).text('QQ 扫码登录'); }
+		  if (poll.data?.event === 65 || poll.data?.event === 402 || poll.data?.event === 68 || poll.data?.event === 403 || attempts >= 90) { clearInterval(loginPollTimer); loginPollTimer = null; $('#mlm-qq-state').text('二维码已失效或登录被取消，请重新登录'); $button.prop('disabled', false).text('QQ 扫码登录'); }
 		}).fail(function (xhr) {
-		  clearInterval(timer); $('#mlm-qq-state').text(xhr.responseJSON?.data?.message || 'QQ 登录请求失败，请重新登录'); $button.prop('disabled', false).text('QQ 扫码登录');
+		  clearInterval(loginPollTimer); loginPollTimer = null; $('#mlm-qq-state').text(xhr.responseJSON?.data?.message || 'QQ 登录请求失败，请重新登录'); $button.prop('disabled', false).text('QQ 扫码登录');
 		});
       }, 2000);
     }).fail(() => { $('#mlm-qq-state').text('二维码获取失败'); $button.prop('disabled', false).text('QQ 扫码登录'); });
+  });
+  $('#mlm-qq-logout').on('click', function () {
+    if (!window.confirm('确定退出 QQ 音乐登录并删除已保存的凭证吗？')) return;
+    const $button = $(this).prop('disabled', true).text('正在退出…');
+    $('#mlm-qq-state').text('正在退出 QQ 音乐登录…');
+    request({ action: 'mlm_qq_logout' }).done(function (response) {
+      if (!response.success) { $('#mlm-qq-state').text(response.data?.message || '退出登录失败'); $button.prop('disabled', false).text('退出登录'); return; }
+      setLoginState(response.data || false);
+      $('#mlm-qq-panel').prop('hidden', true);
+    }).fail(function (xhr) {
+      $('#mlm-qq-state').text(xhr.responseJSON?.data?.message || '退出登录失败，请重试');
+      $button.prop('disabled', false).text('退出登录');
+    });
   });
 
   function searchMusic(page = 1) {
@@ -111,14 +144,10 @@
   });
 
   function renderAlbumTracks(items, albumName) {
-	destroyPlayers(); $results.empty().data('album-items', items).data('album-name', albumName).append('<section class="mlm-album-aplayer-panel"><div class="mlm-album-toolbar"><button type="button" class="button" id="mlm-back-search">← 返回搜索结果</button><strong>' + escapeHtml(albumName) + '（' + items.length + ' 首）</strong><div class="mlm-album-selection"><button type="button" class="button" id="mlm-select-all">全选</button><button type="button" class="button" id="mlm-select-none">取消全选</button><span id="mlm-selected-count">已选 ' + items.length + ' 首</span><button type="button" class="button button-primary" id="mlm-import-album">导入已选曲目</button></div></div><div id="mlm-album-aplayer"></div></section>');
+	destroyPlayers(); $results.empty().data('album-items', items).data('album-name', albumName).append('<section class="mlm-album-aplayer-panel"><div class="mlm-album-toolbar"><button type="button" class="button" id="mlm-back-search">← 返回搜索结果</button><strong>' + escapeHtml(albumName) + '（' + items.length + ' 首）</strong><div class="mlm-album-selection"><button type="button" class="button" id="mlm-select-all">全选</button><button type="button" class="button" id="mlm-select-none">取消全选</button><span id="mlm-selected-count">已选 ' + items.length + ' 首</span><label class="mlm-duplicate-choice"><input type="checkbox" id="mlm-apply-duplicate-choice" checked> 后续重复歌曲使用同一选择</label><button type="button" class="button button-primary" id="mlm-import-album">导入已选曲目</button></div></div><div id="mlm-album-aplayer"></div></section>');
 	if (typeof APlayer !== 'undefined') {
-	  $('#mlm-album-aplayer').html('<div class="mlm-player-loading">正在加载专辑播放器和同步歌词…</div>');
-	  Promise.all(items.map(item => new Promise(resolve => {
-		request({ action: 'mlm_qq_lyrics', track_id: item.id }).always(function (response) {
-		  resolve(audioConfig(item, quality(), response?.success ? (response.data?.lyrics || '') : ''));
-		});
-	  }))).then(function (albumAudio) {
+	  $('#mlm-album-aplayer').html('<div class="mlm-player-loading">正在加载专辑播放器…</div>');
+	  Promise.resolve(items.map(item => audioConfig(item, quality()))).then(function (albumAudio) {
 		const container = document.getElementById('mlm-album-aplayer'); $(container).empty();
 		albumPlayer = new APlayer({ container, autoplay: false, theme: '#2271b1', preload: 'none', mutex: true, lrcType: 1, listFolded: false, listMaxHeight: '360px', audio: albumAudio });
 		$('#mlm-album-aplayer .aplayer-list li').each(function (index) {
@@ -140,7 +169,14 @@
     $('#mlm-import-album').on('click', function () {
 	  const selectedItems = $('.mlm-album-check:checked').map(function () { return items[Number($(this).data('index'))]; }).get().filter(Boolean);
 	  if (!selectedItems.length) { $message.text('请至少选择一首要导入的歌曲。'); return; }
-	  const $button = $(this).prop('disabled', true).text('正在批量导入…'); let index = 0; let success = 0; let playlistUrl = '';
+	  const $button = $(this).prop('disabled', true).text('正在批量导入…'); let index = 0; let success = 0; let playlistUrl = ''; let duplicatePolicy = null;
+	  function resolveAlbumDuplicate(duplicate, details) {
+		if (duplicatePolicy === 'reuse') return true;
+		if (duplicatePolicy === 'skip') return false;
+		const reuse = window.confirm((duplicate.message || '媒体库中已有相同文件。') + details + '\n\n确定：引用已有文件继续导入\n取消：跳过这首歌曲');
+		if ($('#mlm-apply-duplicate-choice').prop('checked')) duplicatePolicy = reuse ? 'reuse' : 'skip';
+		return reuse;
+	  }
       function next() {
 		if (index >= selectedItems.length) {
 		  $message.text('专辑导入完成：成功 ' + success + ' 首，正在前往播放列表“' + albumName + '”…'); $button.text('导入完成');
@@ -148,8 +184,9 @@
 		  return;
 		}
 		const item = selectedItems[index++]; $message.text('正在导入 ' + index + ' / ' + selectedItems.length + '：' + item.title);
-        request({ action: 'mlm_import_music', track: JSON.stringify(item), quality: quality(), post_id: 0, bulk: 1, playlist: albumName })
-		  .done(response => { if (response.success) { success += 1; playlistUrl = response.data?.playlist_edit_url || playlistUrl; } }).always(next);
+        importMusic(item, { post_id: 0, bulk: 1, playlist: albumName }, resolveAlbumDuplicate)
+		  .done(response => { if (response.success) { success += 1; playlistUrl = response.data?.playlist_edit_url || playlistUrl; } })
+		  .fail(xhr => { if (xhr.mlmDuplicateCanceled) $message.text('已取消导入“' + item.title + '”，继续处理下一首。'); }).always(next);
       }
       next();
     });
@@ -167,14 +204,20 @@
   $results.on('click', '.mlm-add', function () {
     const $button = $(this); const $card = $button.closest('.mlm-search-result'); const item = JSON.parse(decodeURIComponent($card.attr('data-track')));
     $button.prop('disabled', true).text('正在导入…'); $message.text('正在下载音频、封面和歌词，请稍候…');
-    request({ action: 'mlm_import_music', track: JSON.stringify(item), quality: quality(), post_id: mlmAdmin.postId }).done(function (response) {
+    importMusic(item, { post_id: mlmAdmin.postId }).done(function (response) {
       const data = response.data;
       $('#title').val(item.title).trigger('input'); $('#mlm_artist').val(item.artist || ''); $('#mlm_album').val(item.album || '');
       $('#mlm_audio_url').val(data.audio_url || ''); $('#mlm_cover_url').val(data.cover_url || ''); $('#mlm_lyrics_url').val(data.lyrics_url || '');
       $('#mlm_source_url').val(item.source_url || ''); $('#mlm_duration').val(item.duration || 0); $('#mlm_lyrics').val(data.lyrics || '');
       $('#mlm-cover-preview').html(data.cover_url ? '<img src="' + escapeHtml(data.cover_url) + '" alt="">' : '');
       $message.html('<span class="mlm-success">' + escapeHtml(data.message) + '</span>'); $button.text('已添加');
-    }).fail(function (xhr) { $message.text(xhr.responseJSON?.data?.message || '导入失败。'); $button.prop('disabled', false).text('添加到音乐库'); });
+      setTimeout(function () {
+        closeSearchModal();
+        const $submit = $('#publish');
+        if ($submit.length) { $submit.trigger('click'); }
+        else { $('#post').trigger('submit'); }
+      }, 500);
+    }).fail(function (xhr) { $message.text(xhr.mlmDuplicateCanceled ? '已取消导入，你可以继续编辑当前歌曲。' : (xhr.responseJSON?.data?.message || '导入失败。')); $button.prop('disabled', false).text('添加到音乐库'); });
   });
 
   $('.mlm-media-button').on('click', function () {
