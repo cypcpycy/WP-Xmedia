@@ -3,7 +3,7 @@ Contributors: music-library-manager
 Tags: music, audio, player, shortcode
 Requires at least: 6.2
 Requires PHP: 7.4
-Stable tag: 0.13.0
+Stable tag: 0.13.1
 License: GPLv2 or later
 
 管理歌曲资料。WordPress 插件连接独立部署的远程音乐 API，完成 QQ 音乐搜索、授权、试听和资源解析；媒体文件仍由 WordPress 导入自己的媒体库。
@@ -22,7 +22,7 @@ License: GPLv2 or later
 
 == 使用方法 ==
 1. 部署随项目提供的音乐 API 服务；本地可使用 Docker，云端也可部署到独立服务器。
-2. 上传并启用 WordPress 插件，在“音乐库 > 设置”导入 JSON 接口规则文件；也可手动填写远程音乐 API 地址。
+2. 上传并启用 WordPress 插件，在“音乐库 > 设置”导入 JSON 接口规则文件。
 3. 进入“音乐库 > 添加歌曲”，首次使用时完成 QQ 扫码授权。QQ 登录状态保存在远程 API 服务器，与浏览器无关。
 4. 选择音质并搜索；可试听、导入单曲，或点击专辑名称查看并批量导入整张专辑。
 5. 整张专辑导入时会自动建立同名播放列表。也可在“音乐库 > 音乐播放列表”自行创建列表并给歌曲分组。
@@ -31,6 +31,10 @@ License: GPLv2 or later
 播放器使用随插件分发的 APlayer 1.10.1（MIT License），不会在访客浏览页面时请求 CDN。歌曲标题、作者、封面、本地媒体附件与 LRC 歌词均会传入播放器；同一页面可放置多个 [music] 和 [music_list] 实例。[music] 可使用 lyrics="no" 关闭歌词。
 
 == 更新日志 ==
+= 0.13.1 =
+* 设置页移除手工 API 地址和 GitHub Token 输入框，只通过 JSON 规则文件配置远程接口。
+* 保存媒体设置时保留已导入规则中的 API 地址。
+
 = 0.13.0 =
 * 接入 GitHub Release 在线更新，在 WordPress 插件列表显示原生版本提示、详情与立即更新操作。
 * 通过公开 GitHub 仓库免配置检查和下载新版本。

@@ -1,0 +1,51 @@
+{
+  "schema": "wp-xmedia-api-rule/v1",
+  "name": "Music Search API - QQ Music",
+  "version": "1.1.0",
+  "base_url": "https://musapi.godmusik.com",
+  "source": "qq",
+  "defaults": {
+    "page_size": 20,
+    "quality": "standard"
+  },
+  "authentication": {
+    "type": "qq_qr_login",
+    "session_managed_by_api": true,
+    "credentials_in_rule": false,
+    "status_endpoint": "login_status",
+    "start_endpoint": "login_start",
+    "poll_endpoint": "login_poll",
+    "logout_endpoint": "logout"
+  },
+  "endpoints": {
+    "health": {"method": "GET", "path": "/api/health"},
+    "search": {"method": "GET", "path": "/api/search?q={query}&source={source}&page={page}&limit={limit}"},
+    "album": {"method": "GET", "path": "/api/album/{album_mid}"},
+    "details": {"method": "GET", "path": "/api/details/{track_id}"},
+    "resource": {"method": "GET", "path": "/api/resource/{track_id}?quality={quality}"},
+    "download": {"method": "GET", "path": "/api/download/{track_id}?quality={quality}&title={title}"},
+    "login_status": {"method": "GET", "path": "/api/qq/login/status"},
+    "login_start": {"method": "POST", "path": "/api/qq/login/start?login_type={login_type}"},
+    "login_poll": {"method": "GET", "path": "/api/qq/login/poll?identifier={identifier}&login_type={login_type}"},
+    "logout": {"method": "POST", "path": "/api/qq/login/logout"}
+  },
+  "response": {
+    "tracks": "tracks",
+    "track": {
+      "id": "id",
+      "title": "name",
+      "artist": "artist",
+      "album": "album",
+      "album_mid": "album_mid",
+      "cover_url": "artwork_url",
+      "source_url": "source_url",
+      "duration": "duration_ms",
+      "source": "source"
+    },
+    "pagination": "pagination",
+    "resource_url": "url",
+    "resource_available": "available",
+    "lyrics": "lyrics"
+  },
+  "qualities": ["standard", "hq", "lossless", "master"]
+}

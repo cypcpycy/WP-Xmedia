@@ -2,7 +2,7 @@
 /**
  * Plugin Name: 音乐资料库管理器
  * Description: 管理歌曲、搜索公开音乐元数据，并通过短代码插入播放器。
- * Version: 0.13.0
+ * Version: 0.13.1
  * Author: Music Library Manager
  * Requires at least: 6.2
  * Requires PHP: 7.4
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'MLM_VERSION', '0.13.0' );
+define( 'MLM_VERSION', '0.13.1' );
 define( 'MLM_FILE', __FILE__ );
 define( 'MLM_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MLM_URL', plugin_dir_url( __FILE__ ) );

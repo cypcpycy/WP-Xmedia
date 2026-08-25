@@ -400,8 +400,9 @@ final class MLM_Plugin {
 	}
 
 	public function sanitize_settings( array $input ): array {
+		$stored = (array) get_option( self::OPTION, array() );
 		return array(
-			'api_base' => esc_url_raw( untrailingslashit( $input['api_base'] ?? '' ) ),
+			'api_base' => esc_url_raw( untrailingslashit( $input['api_base'] ?? ( $stored['api_base'] ?? $this->default_settings()['api_base'] ) ) ),
 			'auto_import' => empty( $input['auto_import'] ) ? 0 : 1,
 			'max_image_mb' => min( 50, max( 1, absint( $input['max_image_mb'] ?? 10 ) ) ),
 			'max_audio_mb' => min( 500, max( 1, absint( $input['max_audio_mb'] ?? 50 ) ) ),
@@ -500,7 +501,7 @@ final class MLM_Plugin {
 		}
 		echo '<form method="post" action="options.php">';
 		settings_fields( 'mlm_settings_group' );
-		echo '<table class="form-table"><tr><th scope="row"><label for="mlm_api_base">远程音乐 API 地址</label></th><td><input class="regular-text" type="url" id="mlm_api_base" name="' . esc_attr( self::OPTION ) . '[api_base]" value="' . esc_attr( $s['api_base'] ) . '" placeholder="https://music-api.example.com"><p class="description">填写已部署的远程 API 根地址，不要以斜杠结尾。本地 Docker 默认使用 http://music-search:8000。</p></td></tr><tr><th scope="row">自动导入媒体</th><td><label><input type="checkbox" name="' . esc_attr( self::OPTION ) . '[auto_import]" value="1" ' . checked( ! empty( $s['auto_import'] ), true, false ) . '> 新歌曲默认勾选自动导入远程文件</label></td></tr>';
+		echo '<table class="form-table"><tr><th scope="row">自动导入媒体</th><td><label><input type="checkbox" name="' . esc_attr( self::OPTION ) . '[auto_import]" value="1" ' . checked( ! empty( $s['auto_import'] ), true, false ) . '> 新歌曲默认勾选自动导入远程文件</label></td></tr>';
 		$limits = array( 'max_image_mb' => '封面最大容量', 'max_audio_mb' => '音频最大容量', 'max_lyrics_mb' => '歌词文件最大容量' );
 		foreach ( $limits as $key => $label ) { printf( '<tr><th scope="row"><label for="mlm_%1$s">%2$s</label></th><td><input class="small-text" type="number" min="1" id="mlm_%1$s" name="%3$s[%1$s]" value="%4$d"> MB</td></tr>', esc_attr( $key ), esc_html( $label ), esc_attr( self::OPTION ), (int) $s[ $key ] ); }
 		echo '</table>';
@@ -509,6 +510,7 @@ final class MLM_Plugin {
 		wp_nonce_field( 'mlm_import_api_rule' );
 		echo '<input type="file" name="mlm_api_rule_file" accept="application/json,.json" required> ';
 		submit_button( '导入并启用接口规则', 'secondary', 'submit', false );
+		echo ' <a class="button" href="' . esc_url( MLM_URL . 'templates/wp-xmedia-api-rule.json' ) . '" download="wp-xmedia-api-rule.json">下载规则模板</a>';
 		$rule = $this->api_rule();
 		if ( $rule ) { echo '<p class="description">当前规则：' . esc_html( (string) ( $rule['name'] ?? '' ) ) . ' ' . esc_html( (string) ( $rule['version'] ?? '' ) ) . '（' . esc_html( (string) ( $rule['base_url'] ?? '' ) ) . '）</p>'; }
 		echo '</form><hr><h2>播放列表</h2><p>可在“音乐库 → 音乐播放列表”中自定义列表，并给歌曲勾选所属列表。插入整张列表使用：<code>[music_playlist id=&quot;播放列表ID&quot;]</code> 或 <code>[music_playlist name=&quot;播放列表名称&quot;]</code>。</p><hr><h2>扩展接口</h2><p><code>mlm_remote_asset_url</code>、<code>mlm_max_remote_asset_size</code>、<code>mlm_asset_imported</code>、<code>mlm_track_saved</code></p></div>';
@@ -561,7 +563,7 @@ final class MLM_Plugin {
 
 	private function music_api_request( string $path, string $method = 'GET' ): array {
 		$base = $this->music_api_base();
-		if ( ! $base ) { wp_send_json_error( array( 'message' => '请先在音乐库设置中填写远程音乐 API 地址。' ), 500 ); }
+		if ( ! $base ) { wp_send_json_error( array( 'message' => '请先在音乐库设置中导入 API 接口规则。' ), 500 ); }
 		$response = wp_remote_request( $base . $path, array( 'method' => $method, 'timeout' => 45 ) );
 		if ( is_wp_error( $response ) ) { wp_send_json_error( array( 'message' => '远程音乐 API 连接失败：' . $response->get_error_message() ), 502 ); }
 		$status = wp_remote_retrieve_response_code( $response );
