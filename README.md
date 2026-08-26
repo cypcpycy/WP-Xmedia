@@ -1,5 +1,7 @@
 # WP-Xmedia
 
+**[中文说明](README.zh-CN.md) | English**
+
 WP-Xmedia is a WordPress music library plugin for managing tracks, importing authorized audio, cover artwork, and lyrics into the WordPress Media Library, and embedding music in posts and pages.
 
 ## Features
