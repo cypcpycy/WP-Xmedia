@@ -4,6 +4,25 @@
   const $message = $('#mlm-search-message');
   const escapeHtml = value => $('<div>').text(value || '').html();
   const request = data => $.post(mlmAdmin.ajaxUrl, Object.assign({ nonce: mlmAdmin.nonce }, data));
+  const askDuplicate = (duplicate, details) => {
+    const deferred = $.Deferred();
+    let $dialog = $('#mlm-duplicate-dialog');
+    if (!$dialog.length) {
+      $('body').append('<div id="mlm-duplicate-dialog" class="mlm-duplicate-dialog" hidden><div class="mlm-duplicate-dialog__box" role="dialog" aria-modal="true" aria-labelledby="mlm-duplicate-title"><h2 id="mlm-duplicate-title">发现重复音乐文件</h2><p class="mlm-duplicate-dialog__message"></p><label class="mlm-duplicate-dialog__apply"><input type="checkbox" id="mlm-duplicate-apply"> 后续重复歌曲使用同一选择</label><div class="mlm-duplicate-dialog__actions"><button type="button" class="button button-primary" data-mlm-duplicate="reuse">引用已有文件</button><button type="button" class="button" data-mlm-duplicate="skip">取消导入</button></div></div></div>');
+      $dialog = $('#mlm-duplicate-dialog');
+    }
+    if ($dialog.parent()[0] !== document.documentElement) { $dialog.detach().appendTo(document.documentElement); }
+    $dialog.find('.mlm-duplicate-dialog__message').text((duplicate.message || '媒体库中已有完全相同的音频文件。') + (details || ''));
+    $dialog.find('#mlm-duplicate-apply').prop('checked', false);
+    $dialog.prop('hidden', false).css({ zIndex: 2147483647, pointerEvents: 'auto' });
+    $dialog.off('click.mlmDuplicate').on('click.mlmDuplicate', '[data-mlm-duplicate]', function () {
+      const reuse = $(this).data('mlm-duplicate') === 'reuse';
+      const apply = $dialog.find('#mlm-duplicate-apply').prop('checked');
+      $dialog.prop('hidden', true);
+      deferred.resolve({ reuse: reuse, apply: apply });
+    });
+    return deferred.promise();
+  };
   const importMusic = (item, options, resolveDuplicate) => {
     const deferred = $.Deferred();
     const send = reuseId => request(Object.assign({ action: 'mlm_import_music', track: JSON.stringify(item), quality: quality(), reuse_duplicate_id: reuseId || 0 }, options || {}))
@@ -12,9 +31,12 @@
         const duplicate = xhr.responseJSON?.data;
         if (!duplicate?.duplicate) { deferred.reject(xhr); return; }
         const details = duplicate.attachment_title ? '\n\n已有文件：' + duplicate.attachment_title : '';
-        const reuse = typeof resolveDuplicate === 'function' ? resolveDuplicate(duplicate, details) : window.confirm((duplicate.message || '媒体库中已有相同文件，是否引用已有文件继续导入？') + details);
-        if (reuse) { send(duplicate.attachment_id); return; }
-        xhr.mlmDuplicateCanceled = true; deferred.reject(xhr);
+        const decision = typeof resolveDuplicate === 'function' ? resolveDuplicate(duplicate, details) : { reuse: window.confirm((duplicate.message || '媒体库中已有相同文件，是否引用已有文件继续导入？') + details) };
+        $.when(decision).done(function (result) {
+          const reuse = result && typeof result === 'object' ? result.reuse : result;
+          if (reuse) { send(duplicate.attachment_id); return; }
+          xhr.mlmDuplicateCanceled = true; deferred.reject(xhr);
+        });
       });
     send(0); return deferred.promise();
   };
@@ -144,7 +166,7 @@
   });
 
   function renderAlbumTracks(items, albumName) {
-	destroyPlayers(); $results.empty().data('album-items', items).data('album-name', albumName).append('<section class="mlm-album-aplayer-panel"><div class="mlm-album-toolbar"><button type="button" class="button" id="mlm-back-search">← 返回搜索结果</button><strong>' + escapeHtml(albumName) + '（' + items.length + ' 首）</strong><div class="mlm-album-selection"><button type="button" class="button" id="mlm-select-all">全选</button><button type="button" class="button" id="mlm-select-none">取消全选</button><span id="mlm-selected-count">已选 ' + items.length + ' 首</span><label class="mlm-duplicate-choice"><input type="checkbox" id="mlm-apply-duplicate-choice" checked> 后续重复歌曲使用同一选择</label><button type="button" class="button button-primary" id="mlm-import-album">导入已选曲目</button></div></div><div id="mlm-album-aplayer"></div></section>');
+    destroyPlayers(); $results.empty().data('album-items', items).data('album-name', albumName).append('<section class="mlm-album-aplayer-panel"><div class="mlm-album-toolbar"><button type="button" class="button" id="mlm-back-search">← 返回搜索结果</button><strong>' + escapeHtml(albumName) + '（' + items.length + ' 首）</strong><div class="mlm-album-selection"><button type="button" class="button" id="mlm-select-all">全选</button><button type="button" class="button" id="mlm-select-none">取消全选</button><span id="mlm-selected-count">已选 ' + items.length + ' 首</span><button type="button" class="button button-primary" id="mlm-import-album">导入已选曲目</button></div></div><div id="mlm-album-aplayer"></div></section>');
 	if (typeof APlayer !== 'undefined') {
 	  $('#mlm-album-aplayer').html('<div class="mlm-player-loading">正在加载专辑播放器…</div>');
 	  Promise.resolve(items.map(item => audioConfig(item, quality()))).then(function (albumAudio) {
@@ -173,9 +195,10 @@
 	  function resolveAlbumDuplicate(duplicate, details) {
 		if (duplicatePolicy === 'reuse') return true;
 		if (duplicatePolicy === 'skip') return false;
-		const reuse = window.confirm((duplicate.message || '媒体库中已有相同文件。') + details + '\n\n确定：引用已有文件继续导入\n取消：跳过这首歌曲');
-		if ($('#mlm-apply-duplicate-choice').prop('checked')) duplicatePolicy = reuse ? 'reuse' : 'skip';
-		return reuse;
+		return askDuplicate(duplicate, details).then(function (result) {
+			if (result.apply) duplicatePolicy = result.reuse ? 'reuse' : 'skip';
+			return result;
+		});
 	  }
       function next() {
 		if (index >= selectedItems.length) {
