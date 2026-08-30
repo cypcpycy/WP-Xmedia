@@ -732,7 +732,7 @@ final class MLM_Plugin_V9 {
 		wp_enqueue_style( 'mlm-admin', MLM_URL . 'assets/css/admin.css', array(), MLM_VERSION );
 		wp_enqueue_style( 'mlm-admin-music', MLM_URL . 'assets/css/admin-music.css', array( 'mlm-admin' ), MLM_VERSION );
 		wp_enqueue_script( 'mlm-aplayer-admin', MLM_URL . 'assets/vendor/aplayer/APlayer.min.js', array(), '1.10.1', true );
-		wp_enqueue_script( 'mlm-admin', MLM_URL . 'assets/js/admin-v01426.js', array( 'jquery', 'wp-data', 'mlm-aplayer-admin' ), MLM_VERSION, true );
+		wp_enqueue_script( 'mlm-admin', MLM_URL . 'assets/js/admin-v01427.js', array( 'jquery', 'wp-data', 'mlm-aplayer-admin' ), MLM_VERSION, true );
 		wp_localize_script( 'mlm-admin', 'mlmAdmin', array( 'ajaxUrl' => admin_url( 'admin-ajax.php' ), 'nonce' => wp_create_nonce( 'mlm_search_music' ), 'postId' => get_the_ID() ) );
 	}
 
