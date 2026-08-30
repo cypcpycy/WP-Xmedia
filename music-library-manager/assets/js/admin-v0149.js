@@ -1,4 +1,78 @@
 (function ($) {
+
+  $(document).on('submit', 'form:has(input[name="action"][value="mlm_import_hermit_json"])', async function (event) {
+    event.preventDefault();
+    const $form = $(this), file = $form.find('input[type="file"]')[0]?.files?.[0], $button = $form.find('input[type="submit"]');
+    if (!file) return;
+    let records;
+    try { records = JSON.parse(await file.text()); } catch (error) { window.alert('JSON 文件格式无效。'); return; }
+    if (!Array.isArray(records)) { window.alert('JSON 文件必须包含歌曲记录数组。'); return; }
+	$button.prop('disabled', true).val('正在检查音乐库…');
+	let filterResult;
+	try {
+	  filterResult = await $.post(mlmAdmin.ajaxUrl, { action: 'mlm_filter_hermit_records', nonce: $form.find('input[name="_wpnonce"]').val(), records: JSON.stringify(records) });
+	} catch (error) {
+	  $button.prop('disabled', false).val('重新读取文件'); window.alert('检查音乐库现有记录失败，请稍后重试。'); return;
+	}
+	if (!filterResult?.success) { $button.prop('disabled', false).val('重新读取文件'); window.alert(filterResult?.data?.message || '检查音乐库现有记录失败。'); return; }
+	const availableIndexes = filterResult.data.available_indexes || [], filtered = Number(filterResult.data.filtered || 0);
+	$form.data('mlmHermitRecords', records);
+	let $selector = $form.find('.mlm-hermit-selector');
+	if (!$selector.length) {
+	  $selector = $('<section class="mlm-hermit-selector" style="max-width:760px;margin-top:16px"><h3>选择需要导入的歌曲</h3><p class="mlm-hermit-filter-summary"></p><p><label><input type="checkbox" class="mlm-hermit-select-all"> 全选 / 取消全选</label>　<span class="mlm-hermit-selected-count">已选择 0 首</span></p><div class="mlm-hermit-song-list" style="max-height:420px;overflow:auto;border:1px solid #ccd0d4;background:#fff;padding:8px"></div><p><button type="button" class="button button-primary mlm-hermit-import-selected">导入所选歌曲</button></p></section>').appendTo($form);
+	}
+	const $list = $selector.find('.mlm-hermit-song-list').empty();
+	availableIndexes.forEach(index => { const item = records[index] || {}; $('<label style="display:flex;gap:8px;padding:7px;border-bottom:1px solid #eee"><input type="checkbox" class="mlm-hermit-song-check" data-index="' + index + '"><span><strong></strong><br><small></small></span></label>').find('strong').text(item.title || '未命名歌曲').end().find('small').text((item.artist || '') + (item.album ? ' — ' + item.album : '')).end().appendTo($list); });
+	if (!availableIndexes.length) { $list.append('<p style="padding:8px">文件中的歌曲均已存在于音乐库，无需重复导入。</p>'); }
+	$selector.find('.mlm-hermit-filter-summary').text('文件共 ' + records.length + ' 首；已过滤音乐库现有歌曲 ' + filtered + ' 首；待导入 ' + availableIndexes.length + ' 首。');
+	$selector.find('.mlm-hermit-import-selected').prop('disabled', availableIndexes.length === 0);
+	$selector.find('.mlm-hermit-select-all').prop('checked', false);
+	$selector.find('.mlm-hermit-selected-count').text('已选择 0 首');
+	$button.prop('disabled', false).val('重新读取文件');
+	return;
+  });
+
+  $(document).on('change', '.mlm-hermit-select-all', function () {
+	const $selector = $(this).closest('.mlm-hermit-selector');
+	$selector.find('.mlm-hermit-song-check').prop('checked', this.checked).trigger('change');
+  });
+
+  $(document).on('change', '.mlm-hermit-song-check', function () {
+	const $selector = $(this).closest('.mlm-hermit-selector');
+	const total = $selector.find('.mlm-hermit-song-check').length, selected = $selector.find('.mlm-hermit-song-check:checked').length;
+	$selector.find('.mlm-hermit-selected-count').text('已选择 ' + selected + ' 首');
+	$selector.find('.mlm-hermit-select-all').prop('checked', total > 0 && selected === total);
+  });
+
+  $(document).on('click', '.mlm-hermit-import-selected', async function () {
+	const $selector = $(this).closest('.mlm-hermit-selector'), $form = $selector.closest('form'), allRecords = $form.data('mlmHermitRecords') || [];
+	const records = $selector.find('.mlm-hermit-song-check:checked').map(function () { return allRecords[Number($(this).data('index'))]; }).get();
+	if (!records.length) { window.alert('请至少选择一首歌曲。'); return; }
+	const $button = $(this).prop('disabled', true).text('正在导入…');
+    let created = 0, repaired = 0, skipped = 0, failed = 0, mediaFailed = 0;
+    let $progress = $form.find('.mlm-import-progress');
+    if (!$progress.length) {
+      $progress = $('<div class="mlm-import-progress" style="margin-top:12px;max-width:620px"><progress max="100" value="0" style="width:100%"></progress><p class="mlm-import-summary"></p><p class="mlm-import-current"></p></div>').appendTo($form);
+    }
+    const nonce = $form.find('input[name="_wpnonce"]').val();
+    for (let index = 0; index < records.length; index++) {
+      const item = records[index], processed = index + 1;
+      $progress.find('progress').val(Math.round(processed / records.length * 100));
+      $progress.find('.mlm-import-current').text('正在处理：' + (item.title || '未命名歌曲'));
+      try {
+        const response = await $.post(mlmAdmin.ajaxUrl, { action: 'mlm_import_hermit_item', nonce: nonce, item: JSON.stringify(item) });
+        if (response?.success && response.data?.status === 'skipped') skipped++;
+        else if (response?.success && response.data?.status === 'repaired') repaired++;
+        else if (response?.success) created++; else failed++;
+        if (response?.success && response.data?.asset_errors) mediaFailed += Object.keys(response.data.asset_errors).length;
+      } catch (error) { failed++; }
+      $progress.find('.mlm-import-summary').text('总计 ' + records.length + ' 条｜已处理 ' + processed + ' 条｜新增 ' + created + ' 条｜补齐 ' + repaired + ' 条｜跳过 ' + skipped + ' 条｜记录失败 ' + failed + ' 条｜媒体失败 ' + mediaFailed + ' 个');
+      localStorage.setItem('mlmHermitImportProgress', JSON.stringify({ total: records.length, processed: processed, created: created, repaired: repaired, skipped: skipped, failed: failed, mediaFailed: mediaFailed }));
+    }
+    $progress.find('.mlm-import-current').text('导入完成。');
+    localStorage.removeItem('mlmHermitImportProgress');
+	$button.prop('disabled', false).text('再次导入所选歌曲');
+  });
   'use strict';
   const $results = $('#mlm-search-results');
   const $message = $('#mlm-search-message');
@@ -231,7 +305,7 @@
       const data = response.data;
       $('#title').val(item.title).trigger('input'); $('#mlm_artist').val(item.artist || ''); $('#mlm_album').val(item.album || '');
       $('#mlm_audio_url').val(data.audio_url || ''); $('#mlm_cover_url').val(data.cover_url || ''); $('#mlm_lyrics_url').val(data.lyrics_url || '');
-      $('#mlm_source_url').val(item.source_url || ''); $('#mlm_duration').val(item.duration || 0); $('#mlm_lyrics').val(data.lyrics || '');
+	  $('#mlm_source_url').val(item.source_url || ''); $('#mlm_lyrics').val(data.lyrics || '');
       $('#mlm-cover-preview').html(data.cover_url ? '<img src="' + escapeHtml(data.cover_url) + '" alt="">' : '');
       $message.html('<span class="mlm-success">' + escapeHtml(data.message) + '</span>'); $button.text('已添加');
       setTimeout(function () {
@@ -246,6 +320,6 @@
   $('.mlm-media-button').on('click', function () {
     const target = $(this).data('target'); const kind = $(this).data('type'); const libraryType = kind === 'cover_url' ? 'image' : (kind === 'audio_url' ? 'audio' : undefined);
     const frame = wp.media({ title: '选择媒体文件', button: { text: '使用此文件' }, library: libraryType ? { type: libraryType } : {}, multiple: false });
-    frame.on('select', function () { const attachment = frame.state().get('selection').first().toJSON(); $('#' + target).val(attachment.url).trigger('change'); if (kind === 'cover_url') $('#mlm-cover-preview').html('<img src="' + escapeHtml(attachment.url) + '" alt="">'); }); frame.open();
+    frame.on('select', function () { const attachment = frame.state().get('selection').first().toJSON(); let readableUrl = attachment.url; try { readableUrl = decodeURIComponent(attachment.url); } catch (error) {} $('#' + target).val(readableUrl).trigger('change'); if (kind === 'cover_url') $('#mlm-cover-preview').html('<img src="' + escapeHtml(attachment.url) + '" alt="">'); }); frame.open();
   });
 })(jQuery);

@@ -22,11 +22,13 @@
 			container.setAttribute('data-mlm-ready', 'true');
 			new window.APlayer({
 				container: container,
+				autoplay: /^(1|yes|true|on)$/i.test(container.getAttribute('data-mlm-autoplay') || ''),
+				theme: '#5895be',
 				preload: 'none',
 				mutex: true,
 				lrcType: tracks.some(function (item) { return item.lrc; }) ? 1 : 0,
 				listFolded: false,
-				listMaxHeight: '420px',
+				listMaxHeight: '349px',
 				audio: tracks
 			});
 		});

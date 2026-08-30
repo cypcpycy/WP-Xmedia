@@ -12,7 +12,6 @@ $_POST['mlm'] = array(
 	'lyrics'        => "测试歌词第一行\n测试歌词第二行",
 	'lyrics_url'    => '',
 	'source_url'    => 'https://wordpress.org/',
-	'duration'      => 0,
 	'import_assets' => 1,
 );
 

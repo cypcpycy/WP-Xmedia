@@ -60,12 +60,15 @@
       const blockProps = useBlockProps({ className: 'mlm-block-preview' });
       function choose(id) { const value = {}; value[idKey] = id; props.setAttributes(value); setOpen(false); }
       function removeBlock() { window.wp.data.dispatch('core/block-editor').removeBlock(props.clientId); }
-      return el(Fragment, {}, mode === 'track' && el(InspectorControls, {}, el(PanelBody, { title: '播放器设置', initialOpen: true }, el(ToggleControl, { label: '显示歌词', checked: props.attributes.showLyrics, onChange: function (value) { props.setAttributes({ showLyrics: value }); } }))),
+      return el(Fragment, {}, el(InspectorControls, {}, el(PanelBody, { title: '播放器设置', initialOpen: true },
+        mode === 'track' && el(ToggleControl, { label: '显示歌词', checked: props.attributes.showLyrics, onChange: function (value) { props.setAttributes({ showLyrics: value }); } }),
+        el(ToggleControl, { label: '自动播放', help: '默认关闭。浏览器仍可能根据自身策略阻止自动播放。', checked: !!props.attributes.autoplay, onChange: function (value) { props.setAttributes({ autoplay: value }); } })
+      )),
         el(BlockControls, {}, el(ToolbarGroup, {}, el(ToolbarButton, { icon: 'trash', label: '删除音乐区块', onClick: removeBlock }))),
         el('div', blockProps, el(SelectedPreview, { mode: mode, item: selected, onOpen: function () { setOpen(true); }, onRemove: removeBlock })),
         isOpen && el(LibraryModal, { mode: mode, selectedId: selectedId, onSelect: choose, onClose: function () { setOpen(false); } }));
     };
   }
-  blocks.registerBlockType('mlm/music-player', { apiVersion: 3, title: '音乐播放器', description: '预览并选择一首歌曲插入文章。', icon: 'format-audio', category: 'media', keywords: ['音乐', '歌曲', '播放器', 'music', 'audio'], attributes: { trackId: { type: 'integer', default: 0 }, showLyrics: { type: 'boolean', default: true } }, edit: blockEdit('track'), save: function () { return null; } });
-  blocks.registerBlockType('mlm/music-playlist', { apiVersion: 3, title: '音乐播放列表', description: '预览并选择一个播放列表插入文章。', icon: 'playlist-audio', category: 'media', keywords: ['音乐', '播放列表', '歌单', 'playlist'], attributes: { playlistId: { type: 'integer', default: 0 } }, edit: blockEdit('playlist'), save: function () { return null; } });
+  blocks.registerBlockType('mlm/music-player', { apiVersion: 3, title: '音乐播放器', description: '预览并选择一首歌曲插入文章。', icon: 'format-audio', category: 'media', keywords: ['音乐', '歌曲', '播放器', 'music', 'audio'], attributes: { trackId: { type: 'integer', default: 0 }, showLyrics: { type: 'boolean', default: true }, autoplay: { type: 'boolean', default: false } }, edit: blockEdit('track'), save: function () { return null; } });
+  blocks.registerBlockType('mlm/music-playlist', { apiVersion: 3, title: '音乐播放列表', description: '预览并选择一个播放列表插入文章。', icon: 'playlist-audio', category: 'media', keywords: ['音乐', '播放列表', '歌单', 'playlist'], attributes: { playlistId: { type: 'integer', default: 0 }, autoplay: { type: 'boolean', default: false } }, edit: blockEdit('playlist'), save: function () { return null; } });
 })(window.wp.blocks, window.wp.element, window.wp.components, window.wp.blockEditor, window.wp.i18n);
