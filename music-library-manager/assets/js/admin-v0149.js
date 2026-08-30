@@ -163,31 +163,33 @@
     if (loggedIn && loginPollTimer) { clearInterval(loginPollTimer); loginPollTimer = null; }
     const stateText = credentialValid ? 'QQ 音乐已登录 · 凭证有效' : (credentialPresent ? (status?.message || 'QQ 音乐登录凭证无效') : 'QQ 音乐尚未登录 · 无有效凭证');
     $('#mlm-qq-state').text(stateText);
-    $('#mlm-qq-login').prop('hidden', loggedIn).toggle(!loggedIn).prop('disabled', false).text('QQ 扫码登录');
+    $('#mlm-qq-login, #mlm-qq-mobile-login').prop('hidden', loggedIn).toggle(!loggedIn).prop('disabled', false);
+    $('#mlm-qq-login').text('QQ 网页扫码'); $('#mlm-qq-mobile-login').text('QQ 音乐客户端扫码');
     $('#mlm-qq-logout').prop('hidden', !credentialPresent).toggle(credentialPresent).prop('disabled', false).text('退出登录');
     if (loggedIn) $('#mlm-qq-panel').prop('hidden', true);
   }
   request({ action: 'mlm_qq_status' }).done(response => setLoginState(response.data || false)).fail(() => setLoginState({ credential_present: false, message: '暂时无法检查登录凭证' }));
-  $('#mlm-qq-login').on('click', function () {
+  $('#mlm-qq-login, #mlm-qq-mobile-login').on('click', function () {
     if (qqLoggedIn) return;
     const $button = $(this).prop('disabled', true).text('正在生成二维码…');
-    request({ action: 'mlm_qq_login_start' }).done(function (response) {
-      if (!response.success) { $('#mlm-qq-state').text(response.data?.message || '二维码获取失败'); $button.prop('disabled', false).text('QQ 扫码登录'); return; }
+    const loginType = this.id === 'mlm-qq-mobile-login' ? 'mobile' : 'qq';
+    request({ action: 'mlm_qq_login_start', login_type: loginType }).done(function (response) {
+      if (!response.success) { $('#mlm-qq-state').text(response.data?.message || '二维码获取失败'); $button.prop('disabled', false); return; }
       if (qqLoggedIn) return;
       $('#mlm-qq-qr').attr('src', response.data.img); $('#mlm-qq-panel').prop('hidden', false); $('#mlm-qq-state').text('等待扫码…');
       let attempts = 0;
       loginPollTimer = setInterval(function () {
         attempts += 1;
-		request({ action: 'mlm_qq_login_poll', identifier: response.data.identifier }).done(function (poll) {
-		  if (!poll.success) { clearInterval(loginPollTimer); loginPollTimer = null; $('#mlm-qq-state').text(poll.data?.message || 'QQ 登录失败，请重试'); $button.prop('disabled', false).text('QQ 扫码登录'); return; }
+		request({ action: 'mlm_qq_login_poll', identifier: response.data.identifier, login_type: loginType }).done(function (poll) {
+		  if (!poll.success) { clearInterval(loginPollTimer); loginPollTimer = null; $('#mlm-qq-state').text(poll.data?.message || 'QQ 登录失败，请重试'); $button.prop('disabled', false); return; }
           if (poll.data?.logged_in) { setLoginState(poll.data); return; }
 		  if (poll.data?.event === 67 || poll.data?.event === 404) $('#mlm-qq-state').text('已扫码，请在手机上确认…');
-		  if (poll.data?.event === 65 || poll.data?.event === 402 || poll.data?.event === 68 || poll.data?.event === 403 || attempts >= 90) { clearInterval(loginPollTimer); loginPollTimer = null; $('#mlm-qq-state').text('二维码已失效或登录被取消，请重新登录'); $button.prop('disabled', false).text('QQ 扫码登录'); }
+		  if (poll.data?.event === 65 || poll.data?.event === 402 || poll.data?.event === 68 || poll.data?.event === 403 || attempts >= 90) { clearInterval(loginPollTimer); loginPollTimer = null; $('#mlm-qq-state').text('二维码已失效或登录被取消，请重新登录'); $button.prop('disabled', false).text(loginType === 'mobile' ? 'QQ 音乐客户端扫码' : 'QQ 网页扫码'); }
 		}).fail(function (xhr) {
-		  clearInterval(loginPollTimer); loginPollTimer = null; $('#mlm-qq-state').text(xhr.responseJSON?.data?.message || 'QQ 登录请求失败，请重新登录'); $button.prop('disabled', false).text('QQ 扫码登录');
+		  clearInterval(loginPollTimer); loginPollTimer = null; $('#mlm-qq-state').text(xhr.responseJSON?.data?.message || 'QQ 登录请求失败，请重新登录'); $button.prop('disabled', false);
 		});
       }, 2000);
-    }).fail(() => { $('#mlm-qq-state').text('二维码获取失败'); $button.prop('disabled', false).text('QQ 扫码登录'); });
+    }).fail(() => { $('#mlm-qq-state').text('二维码获取失败'); $button.prop('disabled', false); });
   });
   $('#mlm-qq-logout').on('click', function () {
     if (!window.confirm('确定退出 QQ 音乐登录并删除已保存的凭证吗？')) return;

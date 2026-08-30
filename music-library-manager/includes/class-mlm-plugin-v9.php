@@ -373,7 +373,7 @@ final class MLM_Plugin_V9 {
 	public function render_search_box(): void {
 		echo '<p>在弹窗中搜索、试听并导入完整歌曲资料。</p><button type="button" class="button button-primary button-large" id="mlm-open-search">打开音乐搜索</button>';
 		echo '<div id="mlm-search-modal" class="mlm-modal" hidden><div class="mlm-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="mlm-modal-title"><header class="mlm-modal-header"><div><h2 id="mlm-modal-title">搜索并添加歌曲</h2><span id="mlm-qq-state">正在检查 QQ 音乐登录状态…</span></div><button type="button" class="mlm-modal-close" aria-label="关闭">×</button></header><div class="mlm-modal-body">';
-		echo '<div class="mlm-qq-status"><button type="button" class="button" id="mlm-qq-login" hidden disabled>QQ 扫码登录</button><button type="button" class="button" id="mlm-qq-logout" hidden disabled>退出登录</button></div><div id="mlm-qq-panel" hidden><img id="mlm-qq-qr" alt="QQ 登录二维码"><p id="mlm-qq-hint">扫码后请在手机上确认。</p></div>';
+		echo '<div class="mlm-qq-status"><button type="button" class="button" id="mlm-qq-login" hidden disabled>QQ 网页扫码</button><button type="button" class="button" id="mlm-qq-mobile-login" hidden disabled>QQ 音乐客户端扫码</button><button type="button" class="button" id="mlm-qq-logout" hidden disabled>退出登录</button></div><div id="mlm-qq-panel" hidden><img id="mlm-qq-qr" alt="QQ 登录二维码"><p id="mlm-qq-hint">扫码后请在手机上确认。</p></div>';
 		echo '<div class="mlm-search-controls"><input class="widefat" id="mlm-search-term" type="search" placeholder="输入歌曲名或歌手，例如：周杰伦 七里香"><select id="mlm-quality"><option value="standard">标准 MP3 128k</option><option value="hq">高品质 MP3 320k</option><option value="lossless">无损 FLAC</option><option value="master">臻品母带</option></select><button type="button" class="button button-primary" id="mlm-search-button">搜索</button><span class="spinner" id="mlm-search-spinner"></span></div><div id="mlm-search-message"></div><div id="mlm-search-results"></div><nav id="mlm-pagination" class="mlm-pagination" hidden><button type="button" class="button" id="mlm-prev-page">上一页</button><strong id="mlm-current-page">第 1 页</strong><button type="button" class="button" id="mlm-next-page">下一页</button></nav></div></div></div>';
 	}
 
@@ -1525,13 +1525,17 @@ final class MLM_Plugin_V9 {
 
 	public function ajax_qq_login_start(): void {
 		$this->check_music_ajax();
-		wp_send_json_success( $this->music_api_request( $this->api_path( 'login_start', array( 'login_type' => 'qq' ), '/api/qq/login/start' ), 'POST' ) );
+		$login_type = sanitize_key( $_POST['login_type'] ?? 'qq' );
+		if ( ! in_array( $login_type, array( 'qq', 'mobile' ), true ) ) { $login_type = 'qq'; }
+		wp_send_json_success( $this->music_api_request( $this->api_path( 'login_start', array( 'login_type' => $login_type ), '/api/qq/login/start?login_type=' . rawurlencode( $login_type ) ), 'POST' ) );
 	}
 
 	public function ajax_qq_login_poll(): void {
 		$this->check_music_ajax();
 		$identifier = sanitize_text_field( wp_unslash( $_POST['identifier'] ?? '' ) );
-		wp_send_json_success( $this->music_api_request( $this->api_path( 'login_poll', array( 'identifier' => $identifier, 'login_type' => 'qq' ), '/api/qq/login/poll?identifier=' . rawurlencode( $identifier ) ) ) );
+		$login_type = sanitize_key( $_POST['login_type'] ?? 'qq' );
+		if ( ! in_array( $login_type, array( 'qq', 'mobile' ), true ) ) { $login_type = 'qq'; }
+		wp_send_json_success( $this->music_api_request( $this->api_path( 'login_poll', array( 'identifier' => $identifier, 'login_type' => $login_type ), '/api/qq/login/poll?identifier=' . rawurlencode( $identifier ) . '&login_type=' . rawurlencode( $login_type ) ) ) );
 	}
 
 	public function ajax_qq_logout(): void {
