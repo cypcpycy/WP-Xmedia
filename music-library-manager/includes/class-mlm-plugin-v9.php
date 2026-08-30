@@ -1061,7 +1061,8 @@ final class MLM_Plugin_V9 {
 		}
 		$base_url = esc_url_raw( untrailingslashit( (string) $rule['base_url'] ) );
 		$is_local_docker_api = 'http://music-search:8000' === $base_url;
-		if ( ! wp_http_validate_url( $base_url ) && ! $is_local_docker_api ) { $this->redirect_rule_import( '接口根地址无效。', false ); }
+		$is_local_host_api = (bool) preg_match( '#^https?://(?:127\.0\.0\.1|localhost)(?::[0-9]{1,5})?$#', $base_url );
+		if ( ! wp_http_validate_url( $base_url ) && ! $is_local_docker_api && ! $is_local_host_api ) { $this->redirect_rule_import( '接口根地址无效。', false ); }
 		$clean_endpoints = array();
 		foreach ( $rule['endpoints'] as $name => $endpoint ) {
 			$name = sanitize_key( $name );
