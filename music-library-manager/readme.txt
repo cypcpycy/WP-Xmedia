@@ -3,7 +3,7 @@ Contributors: music-library-manager
 Tags: music, audio, player, shortcode
 Requires at least: 6.2
 Requires PHP: 7.4
-Stable tag: 0.14.25
+Stable tag: 0.14.26
 License: GPLv2 or later
 
 管理歌曲资料。WordPress 插件连接独立部署的远程音乐 API，完成 QQ 音乐搜索、授权、试听和资源解析；媒体文件仍由 WordPress 导入自己的媒体库。
@@ -31,6 +31,9 @@ License: GPLv2 or later
 播放器使用随插件分发的 APlayer 1.10.1（MIT License），不会在访客浏览页面时请求 CDN。歌曲标题、作者、封面、本地媒体附件与 LRC 歌词均会传入播放器；同一页面可放置多个 [music] 和 [music_list] 实例。[music] 可使用 lyrics="no" 关闭歌词。
 
 == 更新日志 ==
+= 0.14.26 =
+* 后台音乐搜索脚本改用全新文件名，绕过忽略查询参数的CDN缓存，确保双扫码登录逻辑生效。
+
 = 0.14.25 =
 * QQ音乐登录新增“网页扫码”和“QQ音乐客户端扫码”两种入口，并向远程API透传对应登录类型。
 * 二维码失效或请求失败后正确恢复对应登录按钮状态与文字。
