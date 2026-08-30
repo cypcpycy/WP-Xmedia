@@ -13,6 +13,7 @@ final class MLM_GitHub_Updater {
 		add_filter( 'pre_set_site_transient_update_plugins', array( $this, 'check_for_update' ) );
 		add_filter( 'plugins_api', array( $this, 'plugin_information' ), 20, 3 );
 		add_filter( 'http_request_args', array( $this, 'authorize_github_request' ), 10, 2 );
+		add_action( 'delete_site_transient_update_plugins', array( $this, 'clear_release_cache_on_update_check' ) );
 		add_action( 'upgrader_process_complete', array( $this, 'clear_cache_after_update' ), 10, 2 );
 	}
 
@@ -79,6 +80,10 @@ final class MLM_GitHub_Updater {
 		if ( 'update' === ( $options['action'] ?? '' ) && 'plugin' === ( $options['type'] ?? '' ) ) {
 			delete_site_transient( self::CACHE_KEY );
 		}
+	}
+
+	public function clear_release_cache_on_update_check(): void {
+		delete_site_transient( self::CACHE_KEY );
 	}
 
 	private function release() {
