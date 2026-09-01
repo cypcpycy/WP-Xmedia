@@ -1764,7 +1764,7 @@ final class MLM_Plugin_V9 {
 		wp_register_style( 'mlm-player', MLM_URL . 'assets/css/player-v01418.css', array( 'mlm-aplayer' ), MLM_VERSION );
 		wp_register_style( 'mlm-player-layout-fix', MLM_URL . 'assets/css/player-layout-fix-v0146.css', array( 'mlm-player' ), MLM_VERSION );
 		wp_register_script( 'mlm-aplayer', MLM_URL . 'assets/vendor/aplayer/APlayer.min.js', array(), '1.10.1', true );
-		wp_register_script( 'mlm-player', MLM_URL . 'assets/js/player-v01422-token.js', array( 'mlm-aplayer' ), MLM_VERSION, true );
+		wp_register_script( 'mlm-player', MLM_URL . 'assets/js/player-v01435-fast.js', array( 'mlm-aplayer' ), MLM_VERSION, true );
 	}
 
 	private function enqueue_front_assets(): void {
@@ -1835,6 +1835,9 @@ final class MLM_Plugin_V9 {
 		$token = sanitize_text_field( wp_unslash( $_POST['token'] ?? '' ) );
 		$parts = explode( '.', $token, 2 );
 		if ( 2 !== count( $parts ) || ! hash_equals( hash_hmac( 'sha256', $parts[0], wp_salt( 'auth' ) ), $parts[1] ) ) { wp_send_json_error( array( 'message' => '播放器令牌无效。' ), 403 ); }
+		$cache_key = 'mlm_player_data_' . hash( 'sha256', $token );
+		$cached_audio = get_transient( $cache_key );
+		if ( is_array( $cached_audio ) ) { wp_send_json_success( array( 'audio' => $cached_audio, 'cached' => true ) ); }
 		$encoded = strtr( $parts[0], '-_', '+/' );
 		$encoded .= str_repeat( '=', ( 4 - strlen( $encoded ) % 4 ) % 4 );
 		$payload = json_decode( (string) base64_decode( $encoded, true ), true );
@@ -1846,7 +1849,8 @@ final class MLM_Plugin_V9 {
 			$url = $this->attachment_url( $id, 'audio' ); if ( ! $url || $this->is_obviously_invalid_audio_url( $url ) ) { continue; }
 			$audio[] = array( 'name' => wp_strip_all_tags( get_the_title( $post ) ), 'artist' => wp_strip_all_tags( (string) get_post_meta( $id, '_mlm_artist', true ) ), 'url' => esc_url_raw( $url ), 'cover' => esc_url_raw( $this->attachment_url( $id, 'cover' ) ), 'lrc' => $show_lyrics ? sanitize_textarea_field( (string) get_post_meta( $id, '_mlm_lyrics', true ) ) : '' );
 		}
-		wp_send_json_success( array( 'audio' => $audio ) );
+		set_transient( $cache_key, $audio, 5 * MINUTE_IN_SECONDS );
+		wp_send_json_success( array( 'audio' => $audio, 'cached' => false ) );
 	}
 
 	private function shortcode_bool( $value ): bool {
