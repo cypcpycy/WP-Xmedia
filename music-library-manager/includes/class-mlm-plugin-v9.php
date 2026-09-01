@@ -895,6 +895,27 @@ final class MLM_Plugin_V9 {
 		return $result;
 	}
 
+	private function search_track_ids( string $search ): array {
+		global $wpdb;
+		$search = trim( sanitize_text_field( $search ) );
+		if ( '' === $search ) { return array(); }
+		$like = '%' . $wpdb->esc_like( $search ) . '%';
+		$sql = $wpdb->prepare(
+			"SELECT DISTINCT p.ID
+			FROM {$wpdb->posts} p
+			LEFT JOIN {$wpdb->postmeta} artist ON artist.post_id = p.ID AND artist.meta_key = '_mlm_artist'
+			LEFT JOIN {$wpdb->postmeta} album ON album.post_id = p.ID AND album.meta_key = '_mlm_album'
+			WHERE p.post_type = %s
+			AND p.post_status IN ('publish','draft','private','pending','future')
+			AND (p.post_title LIKE %s OR artist.meta_value LIKE %s OR album.meta_value LIKE %s)",
+			self::POST_TYPE,
+			$like,
+			$like,
+			$like
+		);
+		return array_map( 'intval', (array) $wpdb->get_col( $sql ) );
+	}
+
 	private function match_all( string $pattern, string $subject ): array {
 		preg_match_all( $pattern, $subject, $matches, PREG_SET_ORDER ); return $matches;
 	}
@@ -992,22 +1013,71 @@ final class MLM_Plugin_V9 {
 			if ( $unavailable ) { echo '<h2>暂不可播放</h2><ul class="mlm-unavailable-tracks">'; foreach ( $unavailable as $post ) { echo '<li><a href="' . esc_url( get_edit_post_link( $post->ID, 'raw' ) ) . '">' . esc_html( get_the_title( $post ) ) . '</a>：尚未导入音频文件</li>'; } echo '</ul>'; }
 			$member_ids_list = $this->playlist_track_ids( (int) $term->term_id );
 			if ( $editing ) {
-				echo '<section class="mlm-playlist-members"><h2>歌单中的歌曲</h2><p>取消勾选不再需要的歌曲，然后保存。</p><form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="mlm_save_playlist_tracks"><input type="hidden" name="save_mode" value="members"><input type="hidden" name="playlist_id" value="' . (int) $term->term_id . '">'; wp_nonce_field( 'mlm_save_playlist_tracks_' . $term->term_id ); echo '<div class="mlm-track-checklist">';
-				foreach ( $query->posts as $track ) { $cover = $this->attachment_url( $track->ID, 'cover' ); echo '<label class="mlm-track-choice"><input type="checkbox" name="track_ids[]" value="' . (int) $track->ID . '" checked><span class="mlm-choice-cover">' . ( $cover ? '<img src="' . esc_url( $cover ) . '" alt="">' : '<span class="dashicons dashicons-format-audio"></span>' ) . '</span><span><strong>' . esc_html( get_the_title( $track ) ) . '</strong><small>' . esc_html( (string) get_post_meta( $track->ID, '_mlm_artist', true ) ) . '</small></span></label>'; }
-				echo '</div>'; submit_button( '保存歌单曲目', 'primary', 'submit', false ); echo '</form></section>';
+				$member_category = sanitize_text_field( wp_unslash( $_GET['member_category'] ?? '' ) );
+				$member_page = max( 1, absint( $_GET['member_page'] ?? 1 ) );
+				$filtered_members = array_values( array_filter( $query->posts, function ( $track ) use ( $member_category ) {
+					if ( '' === $member_category ) { return true; }
+					$terms = get_the_terms( $track->ID, self::TAXONOMY );
+					if ( 'uncategorized' === $member_category ) { return ! $terms || is_wp_error( $terms ); }
+					return has_term( absint( $member_category ), self::TAXONOMY, $track );
+				} ) );
+				$members_per_page = 30;
+				$total_member_pages = max( 1, (int) ceil( count( $filtered_members ) / $members_per_page ) );
+				$member_page = min( $member_page, $total_member_pages );
+				$visible_members = array_slice( $filtered_members, ( $member_page - 1 ) * $members_per_page, $members_per_page );
+				$visible_member_ids = array_fill_keys( wp_list_pluck( $visible_members, 'ID' ), true );
+				echo '<section class="mlm-playlist-members"><h2>歌单中的歌曲</h2><p>按音乐分类筛选已有歌曲；取消勾选后保存即可移出歌单。每页 30 首。</p>';
+				echo '<form method="get" style="margin:12px 0 18px"><input type="hidden" name="post_type" value="' . esc_attr( self::POST_TYPE ) . '"><input type="hidden" name="page" value="mlm-playlists"><input type="hidden" name="playlist_id" value="' . (int) $term->term_id . '"><input type="hidden" name="edit_playlist" value="1"><label for="mlm-member-category">音乐分类：</label><select id="mlm-member-category" name="member_category"><option value="">全部分类</option><option value="uncategorized" ' . selected( $member_category, 'uncategorized', false ) . '>未分类</option>';
+				$music_categories = get_terms( array( 'taxonomy' => self::TAXONOMY, 'hide_empty' => false, 'orderby' => 'name', 'order' => 'ASC' ) );
+				if ( ! is_wp_error( $music_categories ) ) { foreach ( $music_categories as $category ) { echo '<option value="' . (int) $category->term_id . '" ' . selected( $member_category, (string) $category->term_id, false ) . '>' . esc_html( $category->name ) . '</option>'; } }
+				echo '</select> <button type="submit" class="button">筛选</button></form>';
+				echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="mlm_save_playlist_tracks"><input type="hidden" name="save_mode" value="members"><input type="hidden" name="playlist_id" value="' . (int) $term->term_id . '">'; wp_nonce_field( 'mlm_save_playlist_tracks_' . $term->term_id ); echo '<div class="mlm-track-checklist">';
+				foreach ( $query->posts as $track ) {
+					if ( ! isset( $visible_member_ids[ $track->ID ] ) ) { echo '<input type="hidden" name="track_ids[]" value="' . (int) $track->ID . '">'; continue; }
+					$cover = $this->attachment_url( $track->ID, 'cover' ); $artist = (string) get_post_meta( $track->ID, '_mlm_artist', true ); $categories = get_the_terms( $track->ID, self::TAXONOMY ); $category_names = $categories && ! is_wp_error( $categories ) ? implode( '、', wp_list_pluck( $categories, 'name' ) ) : '未分类'; $detail = implode( ' — ', array_filter( array( $artist, $category_names ) ) );
+					echo '<label class="mlm-track-choice"><input type="checkbox" name="track_ids[]" value="' . (int) $track->ID . '" checked><span class="mlm-choice-cover">' . ( $cover ? '<img src="' . esc_url( $cover ) . '" alt="">' : '<span class="dashicons dashicons-format-audio"></span>' ) . '</span><span><strong>' . esc_html( get_the_title( $track ) ) . '</strong><small>' . esc_html( $detail ) . '</small></span></label>';
+				}
+				if ( ! $visible_members ) { echo '<p>当前分类下没有歌单歌曲。</p>'; }
+				echo '</div>'; submit_button( '保存歌单曲目', 'primary', 'submit', false ); echo '</form>';
+				if ( $total_member_pages > 1 ) { $member_page_base = add_query_arg( array( 'post_type' => self::POST_TYPE, 'page' => 'mlm-playlists', 'playlist_id' => $term->term_id, 'edit_playlist' => 1, 'member_category' => $member_category, 'member_page' => '%#%' ), admin_url( 'edit.php' ) ); echo '<div class="tablenav"><div class="tablenav-pages">' . wp_kses_post( paginate_links( array( 'base' => $member_page_base, 'format' => '', 'current' => $member_page, 'total' => $total_member_pages, 'prev_text' => '‹', 'next_text' => '›' ) ) ) . '</div></div>'; }
+				echo '</section>';
 				$page = max( 1, absint( $_GET['track_page'] ?? 1 ) );
-				$available_query = new WP_Query( array( 'post_type' => self::POST_TYPE, 'post_status' => array( 'publish', 'draft', 'private' ), 'posts_per_page' => 30, 'paged' => $page, 'orderby' => 'title', 'order' => 'ASC', 'post__not_in' => $member_ids_list, 'tax_query' => array( array( 'taxonomy' => self::PLAYLIST_TAXONOMY, 'operator' => 'NOT EXISTS' ) ) ) );
-				echo '<section class="mlm-playlist-members"><h2>从音乐库加入歌曲</h2><p>这里仅显示尚未加入任何歌单的歌曲，每页 30 首。</p>';
-				if ( $available_query->posts ) { echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="mlm_save_playlist_tracks"><input type="hidden" name="save_mode" value="add"><input type="hidden" name="playlist_id" value="' . (int) $term->term_id . '">'; wp_nonce_field( 'mlm_save_playlist_tracks_' . $term->term_id ); echo '<div class="mlm-track-checklist">'; foreach ( $available_query->posts as $track ) { $cover = $this->attachment_url( $track->ID, 'cover' ); echo '<label class="mlm-track-choice"><input type="checkbox" name="track_ids[]" value="' . (int) $track->ID . '"><span class="mlm-choice-cover">' . ( $cover ? '<img src="' . esc_url( $cover ) . '" alt="">' : '<span class="dashicons dashicons-format-audio"></span>' ) . '</span><span><strong>' . esc_html( get_the_title( $track ) ) . '</strong><small>' . esc_html( (string) get_post_meta( $track->ID, '_mlm_artist', true ) ) . '</small></span></label>'; } echo '</div>'; submit_button( '将所选歌曲加入歌单', 'primary', 'submit', false ); echo '</form>'; } else { echo '<p>当前没有尚未加入任何歌单的歌曲。</p>'; }
-				if ( $available_query->max_num_pages > 1 ) { $page_base = add_query_arg( array( 'post_type' => self::POST_TYPE, 'page' => 'mlm-playlists', 'playlist_id' => $term->term_id, 'edit_playlist' => 1, 'track_page' => '%#%' ), admin_url( 'edit.php' ) ); echo '<div class="tablenav"><div class="tablenav-pages">' . wp_kses_post( paginate_links( array( 'base' => $page_base, 'format' => '', 'current' => $page, 'total' => $available_query->max_num_pages, 'prev_text' => '‹', 'next_text' => '›' ) ) ) . '</div></div>'; }
+				$track_search = sanitize_text_field( wp_unslash( $_GET['track_search'] ?? '' ) );
+				$available_args = array( 'post_type' => self::POST_TYPE, 'post_status' => array( 'publish', 'draft', 'private' ), 'posts_per_page' => 30, 'paged' => $page, 'orderby' => 'title', 'order' => 'ASC', 'post__not_in' => $member_ids_list, 'tax_query' => array( array( 'taxonomy' => self::PLAYLIST_TAXONOMY, 'operator' => 'NOT EXISTS' ) ) );
+				if ( '' !== $track_search ) { $matched_track_ids = $this->search_track_ids( $track_search ); $available_args['post__in'] = $matched_track_ids ?: array( 0 ); }
+				$available_query = new WP_Query( $available_args );
+				echo '<section class="mlm-playlist-members"><h2>从音乐库加入歌曲</h2><p>这里只显示尚未加入任何歌单的歌曲，每页 30 首；可搜索音乐名称、专辑名称和作者。</p>';
+				echo '<form method="get" class="search-form" style="margin:12px 0 18px"><input type="hidden" name="post_type" value="' . esc_attr( self::POST_TYPE ) . '"><input type="hidden" name="page" value="mlm-playlists"><input type="hidden" name="playlist_id" value="' . (int) $term->term_id . '"><input type="hidden" name="edit_playlist" value="1"><label class="screen-reader-text" for="mlm-track-search">搜索音乐</label><input type="search" id="mlm-track-search" name="track_search" value="' . esc_attr( $track_search ) . '" placeholder="音乐名称、专辑或作者"><button type="submit" class="button">搜索音乐</button>';
+				if ( '' !== $track_search ) { echo ' <a class="button" href="' . esc_url( $edit_url ) . '">清除搜索</a> <span class="description">找到 ' . (int) $available_query->found_posts . ' 首</span>'; }
+				echo '</form>';
+				if ( $available_query->posts ) { echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="mlm_save_playlist_tracks"><input type="hidden" name="save_mode" value="add"><input type="hidden" name="playlist_id" value="' . (int) $term->term_id . '">'; wp_nonce_field( 'mlm_save_playlist_tracks_' . $term->term_id ); echo '<div class="mlm-track-checklist">'; foreach ( $available_query->posts as $track ) { $cover = $this->attachment_url( $track->ID, 'cover' ); $artist = (string) get_post_meta( $track->ID, '_mlm_artist', true ); $album = (string) get_post_meta( $track->ID, '_mlm_album', true ); $detail = implode( ' — ', array_filter( array( $artist, $album ) ) ); echo '<label class="mlm-track-choice"><input type="checkbox" name="track_ids[]" value="' . (int) $track->ID . '"><span class="mlm-choice-cover">' . ( $cover ? '<img src="' . esc_url( $cover ) . '" alt="">' : '<span class="dashicons dashicons-format-audio"></span>' ) . '</span><span><strong>' . esc_html( get_the_title( $track ) ) . '</strong><small>' . esc_html( $detail ) . '</small></span></label>'; } echo '</div>'; submit_button( '将所选歌曲加入歌单', 'primary', 'submit', false ); echo '</form>'; } else { echo '<p>' . ( '' !== $track_search ? '没有找到符合条件且尚未加入歌单的歌曲。' : '当前没有尚未加入任何歌单的歌曲。' ) . '</p>'; }
+				if ( $available_query->max_num_pages > 1 ) { $page_base = add_query_arg( array( 'post_type' => self::POST_TYPE, 'page' => 'mlm-playlists', 'playlist_id' => $term->term_id, 'edit_playlist' => 1, 'track_search' => $track_search, 'track_page' => '%#%' ), admin_url( 'edit.php' ) ); echo '<div class="tablenav"><div class="tablenav-pages">' . wp_kses_post( paginate_links( array( 'base' => $page_base, 'format' => '', 'current' => $page, 'total' => $available_query->max_num_pages, 'prev_text' => '‹', 'next_text' => '›' ) ) ) . '</div></div>'; }
 				echo '</section>';
 			}
 			if ( current_user_can( 'manage_categories' ) ) { echo '<section class="mlm-playlist-danger"><h2>删除播放列表</h2><p>可只删除列表，也可以同时永久删除列表中的歌曲记录和相关媒体文件。</p><form class="mlm-delete-playlist-form" method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="mlm_delete_playlist"><input type="hidden" name="playlist_id" value="' . (int) $term->term_id . '"><input type="hidden" name="delete_mode" value="playlist_only">'; wp_nonce_field( 'mlm_delete_playlist_' . $term->term_id ); submit_button( '删除播放列表', 'delete', 'submit', false ); echo '</form></section>'; }
 			echo '</div>'; return;
 		}
 		$terms = get_terms( array( 'taxonomy' => self::PLAYLIST_TAXONOMY, 'hide_empty' => false, 'orderby' => 'name', 'order' => 'ASC' ) );
+		$playlist_search = sanitize_text_field( wp_unslash( $_GET['playlist_search'] ?? '' ) );
+		if ( ! is_wp_error( $terms ) && '' !== $playlist_search ) {
+			$matching_ids = array_fill_keys( $this->search_track_ids( $playlist_search ), true );
+			$terms = array_values( array_filter( $terms, function ( $term ) use ( $playlist_search, $matching_ids ) {
+				if ( false !== mb_stripos( (string) $term->name, $playlist_search ) ) { return true; }
+				foreach ( $this->playlist_track_ids( (int) $term->term_id ) as $track_id ) { if ( isset( $matching_ids[ $track_id ] ) ) { return true; } }
+				return false;
+			} ) );
+		}
+		$playlist_page = max( 1, absint( $_GET['playlist_page'] ?? 1 ) );
+		$playlists_per_page = 20;
+		$total_playlists = is_wp_error( $terms ) ? 0 : count( $terms );
+		$total_playlist_pages = max( 1, (int) ceil( $total_playlists / $playlists_per_page ) );
+		$playlist_page = min( $playlist_page, $total_playlist_pages );
+		if ( ! is_wp_error( $terms ) ) { $terms = array_slice( $terms, ( $playlist_page - 1 ) * $playlists_per_page, $playlists_per_page ); }
 		echo '<div class="mlm-playlists-heading"><div><h1>音乐播放列表</h1><p>选择一个歌单，查看并播放其中的全部音乐。</p></div><a class="button button-primary" href="' . esc_url( $manage_url ) . '">新建或管理歌单</a></div>';
-		if ( is_wp_error( $terms ) || ! $terms ) { echo '<div class="mlm-playlist-empty"><p>还没有歌单，请先创建一个音乐播放列表。</p></div></div>'; return; }
+		echo '<form method="get" class="search-form" style="margin:14px 0 20px"><input type="hidden" name="post_type" value="' . esc_attr( self::POST_TYPE ) . '"><input type="hidden" name="page" value="mlm-playlists"><label class="screen-reader-text" for="mlm-playlist-search">搜索播放列表</label><input type="search" id="mlm-playlist-search" name="playlist_search" value="' . esc_attr( $playlist_search ) . '" placeholder="歌单、音乐、专辑或作者"><button type="submit" class="button">搜索</button>';
+		if ( '' !== $playlist_search ) { echo ' <a class="button" href="' . esc_url( add_query_arg( array( 'post_type' => self::POST_TYPE, 'page' => 'mlm-playlists' ), admin_url( 'edit.php' ) ) ) . '">清除搜索</a> <span class="description">找到 ' . (int) $total_playlists . ' 个歌单</span>'; }
+		echo '</form>';
+		if ( is_wp_error( $terms ) || ! $terms ) { echo '<div class="mlm-playlist-empty"><p>' . ( '' !== $playlist_search ? '没有找到符合条件的播放列表。' : '还没有歌单，请先创建一个音乐播放列表。' ) . '</p></div></div>'; return; }
 		echo '<div class="mlm-playlist-grid">';
 		foreach ( $terms as $term ) {
 			$ids = $this->playlist_track_ids( (int) $term->term_id ); $cover = '';
@@ -1015,7 +1085,9 @@ final class MLM_Plugin_V9 {
 			$url = add_query_arg( array( 'post_type' => self::POST_TYPE, 'page' => 'mlm-playlists', 'playlist_id' => $term->term_id ), admin_url( 'edit.php' ) );
 			echo '<a class="mlm-playlist-card" href="' . esc_url( $url ) . '"><span class="mlm-playlist-cover">' . ( $cover ? '<img src="' . esc_url( $cover ) . '" alt="">' : '<span class="dashicons dashicons-playlist-audio"></span>' ) . '</span><span class="mlm-playlist-meta"><strong>' . esc_html( $term->name ) . '</strong><small>' . count( (array) $ids ) . ' 首歌曲</small></span><span class="dashicons dashicons-arrow-right-alt2"></span></a>';
 		}
-		echo '</div></div>';
+		echo '</div>';
+		if ( $total_playlist_pages > 1 ) { $playlist_base = add_query_arg( array( 'post_type' => self::POST_TYPE, 'page' => 'mlm-playlists', 'playlist_search' => $playlist_search, 'playlist_page' => '%#%' ), admin_url( 'edit.php' ) ); echo '<div class="tablenav"><div class="tablenav-pages">' . wp_kses_post( paginate_links( array( 'base' => $playlist_base, 'format' => '', 'current' => $playlist_page, 'total' => $total_playlist_pages, 'prev_text' => '‹', 'next_text' => '›' ) ) ) . '</div></div>'; }
+		echo '</div>';
 	}
 
 	public function register_settings(): void {
