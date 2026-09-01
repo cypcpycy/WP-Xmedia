@@ -402,12 +402,24 @@ final class MLM_Plugin_V9 {
 	public function delete_track_attachments( int $post_id, WP_Post $post ): void {
 		if ( self::POST_TYPE !== $post->post_type ) { return; }
 		if ( $this->keep_track_media_on_delete ) { return; }
-		$attachment_ids = array_filter( array_map( 'absint', array(
-			get_post_meta( $post_id, '_mlm_audio_attachment_id', true ),
-			get_post_meta( $post_id, '_mlm_cover_attachment_id', true ),
-			get_post_meta( $post_id, '_mlm_lyrics_attachment_id', true ),
-			get_post_thumbnail_id( $post_id ),
-		) ) );
+		$attachment_ids = array();
+		foreach ( array( 'audio', 'cover', 'lyrics' ) as $type ) {
+			$attachment_id = absint( get_post_meta( $post_id, '_mlm_' . $type . '_attachment_id', true ) );
+			if ( ! $attachment_id ) {
+				$url = esc_url_raw( (string) get_post_meta( $post_id, '_mlm_' . $type . '_url', true ) );
+				if ( $url ) {
+					$attachment_id = attachment_url_to_postid( $url );
+					if ( ! $attachment_id ) {
+						$path = rawurldecode( (string) wp_parse_url( $url, PHP_URL_PATH ) );
+						$filename = wp_basename( $path );
+						if ( $filename ) { $attachment_id = $this->attachment_id_by_filename( $filename ); }
+					}
+				}
+			}
+			if ( $attachment_id ) { $attachment_ids[] = $attachment_id; }
+		}
+		$thumbnail_id = get_post_thumbnail_id( $post_id );
+		if ( $thumbnail_id ) { $attachment_ids[] = $thumbnail_id; }
 		foreach ( array_unique( $attachment_ids ) as $attachment_id ) {
 			$used_elsewhere = get_posts( array(
 				'post_type' => 'any', 'post_status' => 'any', 'posts_per_page' => 1, 'fields' => 'ids',
