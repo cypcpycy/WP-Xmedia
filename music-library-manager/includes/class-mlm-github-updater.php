@@ -14,6 +14,7 @@ final class MLM_GitHub_Updater {
 		add_filter( 'plugins_api', array( $this, 'plugin_information' ), 20, 3 );
 		add_filter( 'http_request_args', array( $this, 'authorize_github_request' ), 10, 2 );
 		add_action( 'delete_site_transient_update_plugins', array( $this, 'clear_release_cache_on_update_check' ) );
+		add_action( 'load-update-core.php', array( $this, 'force_plugin_check_on_updates_screen' ), 5 );
 		add_action( 'upgrader_process_complete', array( $this, 'clear_cache_after_update' ), 10, 2 );
 	}
 
@@ -84,6 +85,15 @@ final class MLM_GitHub_Updater {
 
 	public function clear_release_cache_on_update_check(): void {
 		delete_site_transient( self::CACHE_KEY );
+	}
+
+	public function force_plugin_check_on_updates_screen(): void {
+		if ( empty( $_GET['force-check'] ) || ! current_user_can( 'update_plugins' ) ) {
+			return;
+		}
+		delete_site_transient( self::CACHE_KEY );
+		delete_site_transient( 'update_plugins' );
+		wp_update_plugins();
 	}
 
 	private function release() {
