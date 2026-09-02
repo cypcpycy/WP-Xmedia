@@ -1764,7 +1764,7 @@ final class MLM_Plugin_V9 {
 		wp_register_style( 'mlm-player', MLM_URL . 'assets/css/player-v01418.css', array( 'mlm-aplayer' ), MLM_VERSION );
 		wp_register_style( 'mlm-player-layout-fix', MLM_URL . 'assets/css/player-layout-fix-v0146.css', array( 'mlm-player' ), MLM_VERSION );
 		wp_register_script( 'mlm-aplayer', MLM_URL . 'assets/vendor/aplayer/APlayer.min.js', array(), '1.10.1', true );
-		wp_register_script( 'mlm-player', MLM_URL . 'assets/js/player-v01436-prefetch.js', array( 'mlm-aplayer' ), MLM_VERSION, true );
+		wp_register_script( 'mlm-player', MLM_URL . 'assets/js/player-v01437-prefetch.js', array( 'mlm-aplayer' ), MLM_VERSION, true );
 	}
 
 	private function enqueue_front_assets(): void {
