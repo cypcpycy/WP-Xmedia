@@ -104,6 +104,9 @@ final class MLM_Plugin_V9 {
 		if ( ! $this->deferred_players ) { return $content; }
 		$content = strtr( $content, $this->deferred_players );
 		$this->deferred_players = array();
+		if ( false !== strpos( $content, 'class="mlm-aplayer"' ) ) {
+			$content .= '<script>(function(){window.mlmPlayerRequests=window.mlmPlayerRequests||{};document.querySelectorAll(".mlm-aplayer[data-mlm-token]:not([data-mlm-requested])").forEach(function(c){var t=c.getAttribute("data-mlm-token")||"",e=c.getAttribute("data-mlm-endpoint")||"";if(!t||!e){return;}c.setAttribute("data-mlm-requested","1");if(window.mlmPlayerRequests[t]){return;}var b=new URLSearchParams();b.set("action","mlm_player_data");b.set("token",t);window.mlmPlayerRequests[t]=fetch(e,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/x-www-form-urlencoded; charset=UTF-8"},body:b.toString()}).then(function(r){if(!r.ok){throw new Error("player request failed");}return r.json();});});}());</script>';
+		}
 		return $content;
 	}
 
@@ -1764,7 +1767,7 @@ final class MLM_Plugin_V9 {
 		wp_register_style( 'mlm-player', MLM_URL . 'assets/css/player-v01418.css', array( 'mlm-aplayer' ), MLM_VERSION );
 		wp_register_style( 'mlm-player-layout-fix', MLM_URL . 'assets/css/player-layout-fix-v0146.css', array( 'mlm-player' ), MLM_VERSION );
 		wp_register_script( 'mlm-aplayer', MLM_URL . 'assets/vendor/aplayer/APlayer.min.js', array(), '1.10.1', true );
-		wp_register_script( 'mlm-player', MLM_URL . 'assets/js/player-v01437-prefetch.js', array( 'mlm-aplayer' ), MLM_VERSION, true );
+		wp_register_script( 'mlm-player', MLM_URL . 'assets/js/player-v01438-early.js', array( 'mlm-aplayer' ), MLM_VERSION, true );
 	}
 
 	private function enqueue_front_assets(): void {
