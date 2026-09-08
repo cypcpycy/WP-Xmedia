@@ -1867,7 +1867,9 @@ final class MLM_Plugin_V9 {
 	}
 
 	private function attachment_url( int $post_id, string $type ): string {
-		return (string) get_post_meta( $post_id, '_mlm_' . $type . '_url', true );
+		$url = (string) get_post_meta( $post_id, '_mlm_' . $type . '_url', true );
+		$id  = absint( get_post_meta( $post_id, '_mlm_' . $type . '_attachment_id', true ) );
+		return $url ? (string) apply_filters( 'wp_get_attachment_url', $url, $id ) : '';
 	}
 
 	public function columns( array $columns ): array {
