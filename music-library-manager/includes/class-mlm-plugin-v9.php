@@ -1867,8 +1867,7 @@ final class MLM_Plugin_V9 {
 	}
 
 	private function attachment_url( int $post_id, string $type ): string {
-		$url = (string) get_post_meta( $post_id, '_mlm_' . $type . '_url', true );
-		return $url && function_exists( 'ucr_replace_upload_url' ) ? (string) ucr_replace_upload_url( $url ) : $url;
+		return (string) get_post_meta( $post_id, '_mlm_' . $type . '_url', true );
 	}
 
 	public function columns( array $columns ): array {
