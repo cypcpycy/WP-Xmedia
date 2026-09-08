@@ -1005,7 +1005,7 @@ final class MLM_Plugin_V9 {
 			foreach ( $query->posts as $post ) {
 				$url = $this->attachment_url( $post->ID, 'audio' );
 				if ( ! $url || $this->is_obviously_invalid_audio_url( $url ) ) { $unavailable[] = $post; continue; }
-				$audio[] = array( 'name' => wp_strip_all_tags( get_the_title( $post ) ), 'artist' => wp_strip_all_tags( (string) get_post_meta( $post->ID, '_mlm_artist', true ) ), 'url' => esc_url_raw( $url ), 'cover' => esc_url_raw( $this->attachment_url( $post->ID, 'cover' ) ), 'lrc' => sanitize_textarea_field( (string) get_post_meta( $post->ID, '_mlm_lyrics', true ) ) );
+				$audio[] = array( 'name' => wp_strip_all_tags( get_the_title( $post ) ), 'artist' => wp_strip_all_tags( (string) get_post_meta( $post->ID, '_mlm_artist', true ) ), 'url' => esc_url_raw( $url ), 'cover' => esc_url_raw( $this->player_cover_url( $post->ID ) ), 'lrc' => sanitize_textarea_field( (string) get_post_meta( $post->ID, '_mlm_lyrics', true ) ) );
 			}
 			$back_url = add_query_arg( array( 'post_type' => self::POST_TYPE, 'page' => 'mlm-playlists' ), admin_url( 'edit.php' ) );
 			$editing = ! empty( $_GET['edit_playlist'] );
@@ -1850,7 +1850,7 @@ final class MLM_Plugin_V9 {
 		foreach ( $ids as $id ) {
 			$post = get_post( $id ); if ( ! $post || self::POST_TYPE !== $post->post_type || 'publish' !== $post->post_status ) { continue; }
 			$url = $this->attachment_url( $id, 'audio' ); if ( ! $url || $this->is_obviously_invalid_audio_url( $url ) ) { continue; }
-			$audio[] = array( 'name' => wp_strip_all_tags( get_the_title( $post ) ), 'artist' => wp_strip_all_tags( (string) get_post_meta( $id, '_mlm_artist', true ) ), 'url' => esc_url_raw( $url ), 'cover' => esc_url_raw( $this->attachment_url( $id, 'cover' ) ), 'lrc' => $show_lyrics ? sanitize_textarea_field( (string) get_post_meta( $id, '_mlm_lyrics', true ) ) : '' );
+			$audio[] = array( 'name' => wp_strip_all_tags( get_the_title( $post ) ), 'artist' => wp_strip_all_tags( (string) get_post_meta( $id, '_mlm_artist', true ) ), 'url' => esc_url_raw( $url ), 'cover' => esc_url_raw( $this->player_cover_url( $id ) ), 'lrc' => $show_lyrics ? sanitize_textarea_field( (string) get_post_meta( $id, '_mlm_lyrics', true ) ) : '' );
 		}
 		set_transient( $cache_key, $audio, 5 * MINUTE_IN_SECONDS );
 		wp_send_json_success( array( 'audio' => $audio, 'cached' => false ) );
@@ -1870,6 +1870,15 @@ final class MLM_Plugin_V9 {
 		$url = (string) get_post_meta( $post_id, '_mlm_' . $type . '_url', true );
 		$id  = absint( get_post_meta( $post_id, '_mlm_' . $type . '_attachment_id', true ) );
 		return $url ? (string) apply_filters( 'wp_get_attachment_url', $url, $id ) : '';
+	}
+
+	private function player_cover_url( int $post_id ): string {
+		$id = absint( get_post_meta( $post_id, '_mlm_cover_attachment_id', true ) );
+		if ( $id ) {
+			$thumbnail = wp_get_attachment_image_url( $id, 'medium' );
+			if ( $thumbnail ) { return (string) $thumbnail; }
+		}
+		return $this->attachment_url( $post_id, 'cover' );
 	}
 
 	public function columns( array $columns ): array {
