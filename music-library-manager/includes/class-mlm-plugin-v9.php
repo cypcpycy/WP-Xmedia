@@ -1838,7 +1838,7 @@ final class MLM_Plugin_V9 {
 		$token = sanitize_text_field( wp_unslash( $_POST['token'] ?? '' ) );
 		$parts = explode( '.', $token, 2 );
 		if ( 2 !== count( $parts ) || ! hash_equals( hash_hmac( 'sha256', $parts[0], wp_salt( 'auth' ) ), $parts[1] ) ) { wp_send_json_error( array( 'message' => '播放器令牌无效。' ), 403 ); }
-		$cache_key = 'mlm_player_data_' . hash( 'sha256', $token );
+		$cache_key = 'mlm_player_data_' . MLM_VERSION . '_' . hash( 'sha256', $token );
 		$cached_audio = get_transient( $cache_key );
 		if ( is_array( $cached_audio ) ) { wp_send_json_success( array( 'audio' => $cached_audio, 'cached' => true ) ); }
 		$encoded = strtr( $parts[0], '-_', '+/' );
@@ -1867,7 +1867,8 @@ final class MLM_Plugin_V9 {
 	}
 
 	private function attachment_url( int $post_id, string $type ): string {
-		return (string) get_post_meta( $post_id, '_mlm_' . $type . '_url', true );
+		$url = (string) get_post_meta( $post_id, '_mlm_' . $type . '_url', true );
+		return $url && function_exists( 'ucr_replace_upload_url' ) ? (string) ucr_replace_upload_url( $url ) : $url;
 	}
 
 	public function columns( array $columns ): array {
